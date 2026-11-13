@@ -1,0 +1,192 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "AutoDorker-1.0.0-SBOM",
+  "documentNamespace": "https://cybernest.local/spdx/autodorker-1.0.0",
+  "creationInfo": {
+    "created": "2026-11-13T01:47:31Z",
+    "creators": [
+      "Tool: AutoDorker-SBOM-Generator-1.0"
+    ]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-pypi-python-docx",
+      "name": "python-docx",
+      "versionInfo": "1.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-pypi-beautifulsoup4",
+      "name": "beautifulsoup4",
+      "versionInfo": "4.15.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-pypi-lxml",
+      "name": "lxml",
+      "versionInfo": "6.1.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-pypi-pyyaml",
+      "name": "pyyaml",
+      "versionInfo": "6.0.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-pypi-esprima",
+      "name": "esprima",
+      "versionInfo": "4.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-chrono",
+      "name": "chrono",
+      "versionInfo": "0.4.45",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-csv",
+      "name": "csv",
+      "versionInfo": "1.4.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-rand",
+      "name": "rand",
+      "versionInfo": "0.8.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-regex",
+      "name": "regex",
+      "versionInfo": "1.13.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-rusqlite",
+      "name": "rusqlite",
+      "versionInfo": "0.32.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-scraper",
+      "name": "scraper",
+      "versionInfo": "0.21.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-serde",
+      "name": "serde",
+      "versionInfo": "1.0.229",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-serde-json",
+      "name": "serde_json",
+      "versionInfo": "1.0.154",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-sha2",
+      "name": "sha2",
+      "versionInfo": "0.10.9",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-ureq",
+      "name": "ureq",
+      "versionInfo": "2.12.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-cargo-url",
+      "name": "url",
+      "versionInfo": "2.5.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "SPDXID": "SPDXRef-asset-htmx.min.js",
+      "name": "htmx.min.js",
+      "versionInfo": "2.0.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-asset-JetBrainsMono.woff2",
+      "name": "JetBrainsMono.woff2",
+      "versionInfo": "2.304",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-asset-synth-ledger.css",
+      "name": "synth-ledger.css",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a0b817f3800d8acc0a697ab124c0f52ea47f8bdbb5d9300bf0cffc84ecf64aca"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-asset-autodorker-ui.js",
+      "name": "autodorker-ui.js",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "db4d3dd842e93420799584e4b5fc3547a6f40594877b44ab3dfe7f8382a9a220"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-asset-DorkSet.csv",
+      "name": "DorkSet.csv",
+      "versionInfo": "295-rules",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "bc236738984b8a2b474e12ff5ae4dd2e257aaaafc4ae8b2b7697d8b83d60c1e6"
+        }
+      ]
+    }
+  ]
+}

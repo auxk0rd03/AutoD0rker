@@ -1,0 +1,41 @@
+# Python virtual environments, caches, and bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Compiled binaries and Rust/Go build artifacts
+CodeBase/bin/*
+!CodeBase/bin/.gitkeep
+CodeBase/crates/*/target/
+target/
+
+# Runtime SQLite3 databases, WAL journals, snapshots, and per-target outputs
+CodeBase/data/*.db
+CodeBase/data/*.db-wal
+CodeBase/data/*.db-shm
+CodeBase/data/*.db-journal
+CodeBase/data/backups/*
+!CodeBase/data/backups/.gitkeep
+CodeBase/data/Output/*
+!CodeBase/data/Output/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+
+# Runtime logs, PID locks, temporary harvest sandboxes, and sensitive files
+*.log
+*.pid
+.env
+.env.*
+*.pem
+*.key
+*.jks
+adk_harvest_*
+blackroute_dork_*
+.cache/
+.DS_Store
+Thumbs.db

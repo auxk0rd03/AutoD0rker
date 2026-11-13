@@ -1,0 +1,28 @@
+<form id="scan-form-batch" hx-post="/api/scan" hx-encoding="multipart/form-data" hx-target="#scan-status-banner" hx-swap="outerHTML">
+  <label class="field-label" for="target_urls_batch">MULTI-URL TARGET LIST (url1,url2,url3,...)</label>
+  <textarea id="target_urls_batch" name="target_urls" rows="3" placeholder="https://app1.example.com,https://app2.example.com,https://uat.example.com"></textarea>
+
+  <label class="field-label" for="src_list_file">OR UPLOAD TARGET .CSV (MAX 2 MB // HEADER AUTO-SKIP)</label>
+  <input id="src_list_file" name="src_list_file" type="file" accept=".csv,.txt" />
+
+  <div class="toggle-list">
+    <input type="hidden" name="stealth_present" value="1" />
+    <label class="toggle-item">
+      <input type="checkbox" name="stealth_mode" checked />
+      <span>STEALTH PROTOCOL (PASSIVE BFS + AST, ZERO 404 NOISE)</span>
+    </label>
+    <label class="toggle-item">
+      <input type="checkbox" name="shadow_mode" />
+      <span>SHADOW MODE (INCLUDE LOW-ENTROPY INFO FINDINGS)</span>
+    </label>
+    <label class="toggle-item">
+      <input type="checkbox" name="local_staging" />
+      <span>LOCAL STAGING MODE (ALLOW RFC 1918 / LOOPBACK)</span>
+    </label>
+  </div>
+
+  <label class="field-label" for="engagement_id_batch">ENGAGEMENT ID (OPTIONAL // X-Security-Engagement)</label>
+  <input id="engagement_id_batch" name="engagement_id" type="text" placeholder="CN-AUDIT-2026-ADK" />
+
+  <button type="submit" class="btn-primary">EXECUTE BATCH AUTODORKER PIPELINE</button>
+</form>

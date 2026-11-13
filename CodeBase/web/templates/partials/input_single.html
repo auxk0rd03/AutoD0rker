@@ -1,0 +1,25 @@
+<form id="scan-form-single" hx-post="/api/scan" hx-target="#scan-status-banner" hx-swap="outerHTML">
+  <label class="field-label" for="target_urls">SINGLE TARGET URL (https://portal.example.com)</label>
+  <input id="target_urls" name="target_urls" type="text" placeholder="https://target.example.com" required />
+
+  <div class="toggle-list">
+    <input type="hidden" name="stealth_present" value="1" />
+    <label class="toggle-item">
+      <input type="checkbox" name="stealth_mode" checked />
+      <span>STEALTH PROTOCOL (PASSIVE BFS + AST, ZERO 404 NOISE)</span>
+    </label>
+    <label class="toggle-item">
+      <input type="checkbox" name="shadow_mode" />
+      <span>SHADOW MODE (INCLUDE LOW-ENTROPY INFO FINDINGS)</span>
+    </label>
+    <label class="toggle-item">
+      <input type="checkbox" name="local_staging" />
+      <span>LOCAL STAGING MODE (ALLOW RFC 1918 / LOOPBACK)</span>
+    </label>
+  </div>
+
+  <label class="field-label" for="engagement_id">ENGAGEMENT ID (OPTIONAL // X-Security-Engagement)</label>
+  <input id="engagement_id" name="engagement_id" type="text" placeholder="CN-AUDIT-2026-ADK" />
+
+  <button type="submit" class="btn-primary">EXECUTE AUTODORKER PIPELINE</button>
+</form>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SYS.01 // AutoDorker Autonomous Dork &amp; AST Surface Auditor</title>
+  <link rel="stylesheet" href="/static/css/synth-ledger.css" />
+  <script src="/static/js/htmx.min.js" defer></script>
+  <script src="/static/js/autodorker-ui.js" defer></script>
+</head>
+<body>
+  <div class="frame-shell">
+    <header class="top-bar">
+      <div class="brand-tag">[SYS.01 // AUTODORKER v1.0 // CYBERNEST LABS]</div>
+      <div class="status-cluster">
+        <div id="top-status-bar" hx-get="/telemetry/status" hx-trigger="every 30s" hx-swap="innerHTML">
+          {{.StatusBarHTML}}
+        </div>
+        <span id="audit-lock-badge" class="val-muted">[AUDIT_LOCK: STANDBY]</span>
+      </div>
+    </header>
+
+    <section class="kpi-strip">
+      <div id="kpi-targets" class="kpi-cell">
+        <span class="kpi-label">TARGETS</span>
+        <span class="kpi-val">{{printf "%02d" .State.Targets}}</span>
+      </div>
+      <div id="kpi-dorks-run" class="kpi-cell">
+        <span class="kpi-label">EVALUATED</span>
+        <span class="kpi-val">{{.State.DorksRun}}</span>
+      </div>
+      <div id="kpi-verified-tp" class="kpi-cell">
+        <span class="kpi-label">VERIFIED TP</span>
+        <span class="kpi-val val-pos">{{printf "%02d" .State.VerifiedTP}}</span>
+      </div>
+      <div id="kpi-ast-fp-drop" class="kpi-cell">
+        <span class="kpi-label">SUPPRESSED FP</span>
+        <span class="kpi-val val-warn">{{printf "%02d" .State.FPDropped}}</span>
+      </div>
+      <div id="kpi-risk-score" class="kpi-cell">
+        <span class="kpi-label">MAX RISK</span>
+        <span class="kpi-val {{.RiskClass}}">{{.State.MaxRisk}}/100</span>
+      </div>
+    </section>
+
+    <main class="main-grid">
+      <section>
+        <div class="panel-box">
+          <div class="panel-header">
+            <span>MISSION CONTROL // TARGET INGESTION</span>
+            <span class="val-muted">[{{.State.DorkCount}} DORKS // {{.State.ChainCount}} CHAIN]</span>
+          </div>
+
+          <div class="mode-tabs">
+            <button id="tab-mode-single" type="button" class="tab-btn active"
+              hx-get="/ui/input-mode?mode=single" hx-target="#target-input-container" hx-swap="innerHTML">
+              [MODE: SINGLE URL]
+            </button>
+            <button id="tab-mode-batch" type="button" class="tab-btn"
+              hx-get="/ui/input-mode?mode=batch" hx-target="#target-input-container" hx-swap="innerHTML">
+              [MODE: MULTI-URL / .CSV]
+            </button>
+          </div>
+
+          <div id="target-input-container">
+            {{template "input_single.html" .}}
+          </div>
+
+          <div id="scan-status-banner" class="panel-status val-muted">
+            [STANDBY // LOOPBACK 127.0.0.1 // SSRF GUARD ARMED]
+          </div>
+        </div>
+
+        <div class="panel-box">
+          <div class="panel-header">
+            <span>LIVE SSE TELEMETRY STREAM</span>
+            <span class="val-pos">/api/stream-logs-sse</span>
+          </div>
+          <div id="sse-console-log" class="sse-terminal"></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="panel-box">
+          <div class="panel-header">
+            <span>VERIFIED DORK LEDGER &amp; ENTERPRISE DELIVERABLES</span>
+            <span class="val-muted">[VIDS .MD / .DOCX / BATCH .ZIP]</span>
+          </div>
+
+          <div class="export-bar">
+            <a id="btn-export-md" class="btn-action" href="/api/export/md/{{if gt .State.LatestScanID 0}}{{.State.LatestScanID}}{{else}}latest{{end}}">[EXPORT .MD]</a>
+            <a id="btn-export-docx" class="btn-action" href="/api/export/docx/{{if gt .State.LatestScanID 0}}{{.State.LatestScanID}}{{else}}latest{{end}}">[EXPORT .DOCX]</a>
+            <a class="btn-action" href="/api/export/batch-zip">[DOWNLOAD BATCH .ZIP]</a>
+            <button type="button" class="btn-action" hx-post="/api/backup" hx-target="#audit-lock-badge" hx-swap="innerHTML">[VACUUM + SHA256 LOCK]</button>
+          </div>
+
+          <div id="panel-visual-telemetry" class="svg-box">
+            {{.SVGHTML}}
+          </div>
+
+          <div class="ledger-wrap">
+            <table class="ledger-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>SEV</th>
+                  <th>CATEGORY / DORK SIGNATURE / ENDPOINT</th>
+                  <th class="num-right">ENTROPY / AST</th>
+                  <th>ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody id="dork-findings-tbody">
+                {{.InitialRowsHTML}}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="oob-sink" class="hidden-sink" aria-hidden="true"></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,296 @@
+Category,Dork_String,Notes
+[CHAIN] Files Containing Passwords,"(ext:nix | site:github.com) ""BEGIN OPENSSH PRIVATE KEY""",Combined OpenSSH private key exposures across Nix files and GitHub
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""proftpd.conf"" | ""dhcpd.conf"" | ""server.conf"" | ""smb.conf"")",Combined exposed daemon configuration files in directory listings
+[CHAIN] Files Containing Usernames,"ext:log (""Header for logs at time"" | ""START test_database"")",Combined log header and database test log username disclosures
+[CHAIN] Pages Containing Login Portals,"(site:uat.* | site:preprod.* | site:admin.*.* | site:prod.*.* | site:ap.*.* | site:cp.*.* | site:email.*.*) (inurl:login | intitle:""login"")","Combined subdomain environment login portals (UAT, Preprod, Admin, Prod, AP, CP, Email)"
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""configmap.yaml"" | ""config.yaml"" | ""*-config.yaml"" | ""rbac.yaml"" | ""role.yaml"" | ""rolebinding.yaml"" | ""*-rbac.yaml"" | ""cloud-config.yml"" | ""application.yml"" | ""users.yml"" | ""admin.yml"" | ""phpunit.yml"" | ""bitbucket-pipelines.yml"")","Combined Kubernetes, CI/CD, and application YAML configuration exposures"
+[CHAIN] Files Containing Juicy Info,"inurl:pastebin (intitle:mastercard | ""VISA"")",Combined payment card keyword dorks on Pastebin
+[CHAIN] Files Containing Juicy Info,"inurl:s3.amazonaws.com (intitle:""AWS S3 Explorer"" | ""index of /"" | (ext:xml intext:""index of"" -site:github.com))",Combined AWS S3 bucket listing and explorer dorks
+[CHAIN] Files Containing Juicy Info,"inurl:* (""auditing.txt"" | ""encryption.txt"")",Combined auditing and encryption text file exposures
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""cgi.pl"" | ""env.cgi"")",Combined CGI script directory listing exposures
+[CHAIN] Files Containing Juicy Info,"filetype:reg (HKEY_CURRENT_USER | ""[HKEY_USERSDEFAULT]"")",Combined Windows Registry export file dorks
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""db.py"" | ""db.sqlite3"" | ""wc.db"" | "".db"")",Combined database script and SQLite file directory listings
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""setting.php"" | ""configuration.php"" | ""config.php"" | ""config.php.txt"" | ""config.txt"" | ""configuration.txt"" | ""config.html"" | ""config/db"" | inurl:/config/ | ""/config/prod/"")",Combined PHP and general configuration file directory listings
+[CHAIN] Files Containing Juicy Info,"(site:*.edu.* | site:*.ac.*) (filetype:template | intitle:""index of"" *.ics)",Combined academic domain template and calendar file exposures
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""wp-config.php.old"" | ""wp-config.php.backup"" | ""wp-config.php.bak"" | inurl:/backup/ ""wp-config"") | (inurl:wp-config.txt intext:mysql)",Combined WordPress wp-config backup and plaintext exposures
+[CHAIN] Pages Containing Login Portals,site:login.*.* | site:portal.*.*,Combined login and portal subdomain discovery
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""/wp-content/uploads"" | ""/wp-content/plugins"" | ""/wp-includes/sitemaps"" | ""/wp-admin"" | ""wp-content.zip"" | ""wp-admin.zip"")",Combined WordPress directory and archive index exposures
+[CHAIN] Files Containing Juicy Info,"intitle:""Index of"" (""/node"" | ""/node_modules/"" | ""/vendor/guzzlehttp"" | ""/_MACOSX"")",Combined dependency and build artifact directory listings
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""main.js"" | ""login.js"" | ""*.js"")",Combined JavaScript file directory listings
+[CHAIN] Files Containing Juicy Info,"site:.com intitle:""index of"" (""/mobikwike"" | ""/sbi"" | ""/csb"" | ""/paypal"" | ""/payments.txt"" | ""/bank/"")",Combined financial and payment gateway directory listings
+[CHAIN] Files Containing Juicy Info,"""index of"" (""cloudapp.net"" | ""cloudapp.azure.com"")",Combined Azure CloudApp directory listings
+[CHAIN] Pages Containing Login Portals,inurl:uux.aspx,Deduplicated and fixed typo (initial:inurl:uux.aspx -> inurl:uux.aspx)
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""backup.zip"" | ""backup.tar"" | ""source_code.zip"" | ""public.zip"" | ""admin.zip"")",Combined compressed backup and source code archive listings
+[CHAIN] Files Containing Passwords,"intitle:""index of"" (""secret.txt"" | ""creds.txt"" | ""pass.txt"" | ""username.txt"" | ""/secrets/"" | ""private_key.pem"" | ""keystore.jks"")","Combined plaintext credential, secret, and key file directory listings"
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" ("".sql"" | ""database.sql"" | ""backuop/*.sql"") | (inurl:backup filetype:sql) | (""structure"" + ext:sql) | (""-- phpMyAdmin SQL Dump"" ext:txt)",Combined SQL dump and database backup exposures
+[CHAIN] Pages Containing Login Portals,"(inurl:/login.aspx | inurl:/admin.aspx | inurl:/ui/login.aspx | inurl:_admin ""login.aspx"" | inurl:""admin/default.aspx"" | site:*/AdminLogin.aspx)",Combined ASP.NET login and admin portal dorks
+[CHAIN] Files Containing Juicy Info,"intitle:""index of /"" (""docker-compose.yml"" | "".env"" | ""styleci.yml"")",Combined Docker Compose and .env file directory exposures
+[CHAIN] Files Containing Juicy Info,"(inurl:info.php intext:""PHP Version"" intitle:""phpinfo()"") | (intitle:""phpinfo"" intext:""HTTP_HOST"") | (intext:""index of"" (""phpinfo"" | ""infophp()""))",Combined phpinfo() diagnostic page exposures
+[CHAIN] Various Online Devices,"inurl:""device.rsp"" (-in | -com)",Combined DVR/IoT device.rsp web interface dorks
+[CHAIN] Files Containing Juicy Info,"inurl:""administrator/components/com_admin/sql/updates/"" (""mysql"" | ""sqlazure"")",Combined Joomla SQL update directory paths
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""cron.sh"" | ""setup.sh"" | ""after.sh"" | ""*db.sh"" | ""configure.sh"" | ""deploy.sh"" | ""release.sh"" | ""login.sh"")","Combined shell deployment, cron, and setup script exposures"
+[CHAIN] Pages Containing Login Portals,"inurl:""opac/login"" (site:.edu | site:*)",Combined OPAC library catalog login portals
+[CHAIN] Files Containing Juicy Info,"intitle:""index of"" (""error_log"" | ""error_logs"" | ""catalina.out"" | ""npm-debug.log"" | ""logs.txt"" | ""passenger.log"" | ""production.log"" | inurl:php_error.log)",Combined application and server error log exposures
+Various Online Devices,inurl:home.htm intitle:1766,Original Contributor: Kishoreram
+Files Containing Juicy Info,"site:.edu filetype:xls ""root"" database",Original Contributor: defaltredmode
+Files Containing Passwords,"intext:""aws_access_key_id"" | intext:""aws_secret_access_key"" filetype:json | filetype:yaml",Original Contributor: Joel Indra
+Files Containing Passwords,intitle:index of /etc/ssh,Original Contributor: Shivam Dhingra
+Vulnerable Servers,"intext:""siemens"" & inurl:""/portal/portal.mwsl""",Original Contributor: Kishoreram
+Vulnerable Servers,"intitle:""SSL Network Extender Login"" -checkpoint.com",Original Contributor: Everton Hydd3n
+Vulnerable Servers,"inurl:""cgi-bin/koha""",Original Contributor: Hilary Soita
+Files Containing Juicy Info,"intitle:""GlobalProtect Portal""",Original Contributor: Javier Bernardo
+Files Containing Juicy Info,intitle:index of /etc/openldap,Original Contributor: Joel Indra
+Files Containing Juicy Info,"intitle:""/zircote/swagger-php""",Original Contributor: Anirudh Kumar Kushwaha
+Files Containing Juicy Info,"""PHP Fatal error:"" ext:log OR ext:txt",Original Contributor: Nadir Boulacheb (RubX)
+Files Containing Juicy Info,"intitle:Index of ""/etc/network"" | ""/etc/cni/net.d""",Original Contributor: vinit asher
+Vulnerable Servers,"intitle:""FileCatalyst file transfer solution""",Original Contributor: Kamran Saifullah
+Vulnerable Servers,"allintitle:""ITRS OP5 Monitor""",Original Contributor: Thomas Heverin
+Sensitive Directories,intitle: index of /concrete/Password,Original Contributor: Gautam Rawat
+Vulnerable Servers,"inurl:""wa.exe?TICKET""",Original Contributor: Nadir Boulacheb (RubX)
+Files Containing Juicy Info,site:com inurl:invoice,Original Contributor: Sultan Shaikh
+Files Containing Juicy Info,"intitle:""Index of /confidential""",Original Contributor: Gautam Rawat
+Files Containing Juicy Info,"inurl:""/wp-json/oembed/1.0/embed?url=""",Original Contributor: Jeel Patel
+Vulnerable Servers,"""PMB"" AND (""changelog.txt"" OR inurl:opac_css)",Original Contributor: Wallehazz
+Vulnerable Servers,"allintitle:""Bright Cluster Manager"" site:.edu",Original Contributor: Thomas Heverin
+Files Containing Juicy Info,"""Started by upstream project"" ext:txt",Original Contributor: Nadir Boulacheb (RubX)
+Files Containing Juicy Info,"ext:java intext:""executeUpdate""",Original Contributor: BULLETMHS
+Vulnerable Servers,"intitle:""Welcome to iTop version"" wizard",Original Contributor: Nadir Boulacheb (RubX)
+Vulnerable Servers,"intitle:""Installation Wizard - PowerCMS v2""",Original Contributor: Nadir Boulacheb (RubX)
+Vulnerable Servers,"intitle:""OpenVpn Status Monitor""",Original Contributor: Sabean Technology
+Files Containing Juicy Info,(site:jsonformatter.org | site:codebeautify.org) & (intext:aws | intext:bucket | intext:password | intext:secret | intext:username),Original Contributor: letmewin cyber
+Sensitive Directories,"intitle:""index of"" database.properties",Original Contributor: Odela Rohith
+Vulnerable Servers,"inurl:install.php intitle:""Froxlor Server Management Panel - Installation""",Original Contributor: Nadir Boulacheb (RubX)
+Files Containing Juicy Info,"intitle:""Fleet Management Portal""",Original Contributor: Kamran Saifullah
+Files Containing Juicy Info,"inurl:""?url=http""",Original Contributor: Jeel Patel
+Files Containing Juicy Info,"site:.com ""index of docker""",Original Contributor: Bambang Sutrisna
+Files Containing Juicy Info,"intext:""user"" filetype:php intext:""account"" inurl:/admin",Original Contributor: saurabh kode
+Files Containing Juicy Info,"intext:""userfiles"" intitle:""Index Of"" site:*.com.*",Original Contributor: J. Daniel Elias Valdez
+Files Containing Juicy Info,site:id filetype:sql,Original Contributor: Bambang Sutrisna
+Files Containing Juicy Info,"intext:""administrator"" filetype:txt intext:""account"" inurl:/admin , intext:""administrator"" filetype:txt intext:""account"" allinurl:",Original Contributor: Skidrow
+Pages Containing Login Portals,"allintitle:""ASPECT Control Panel""",Original Contributor: Thomas Heverin
+Pages Containing Login Portals,"allintitle:""CAT12CE - WebInterface""",Original Contributor: Thomas Heverin
+Pages Containing Login Portals,"allintitle:""code-server login""",Original Contributor: Thomas Heverin
+Pages Containing Login Portals,"inurl:""UserLogin/"" intitle:""Panel""",Original Contributor: saurabh kode
+Files Containing Juicy Info,inurl:/HappyAxis.jsp,Original Contributor: Aashiq Ahamed
+Files Containing Juicy Info,"site:*.*.* intitle:""index of"" *.pcapng",Original Contributor: Connect2maviya
+Files Containing Juicy Info,"inurl:.""install.appcenter.ms/orgs/""",Original Contributor: Kamran Saifullah
+Files Containing Juicy Info,"site:.edu intext:""robotics"" inurl:/research",Original Contributor: Chunfeng Huang
+Files Containing Juicy Info,inurl:typo3/index.php,Original Contributor: Appsec Jay
+Files Containing Juicy Info,"filetype:log intext:""Account Number""",Original Contributor: Noor Alhomeed
+Files Containing Juicy Info,"intitle:""WAMPSERVER Homepage""",Original Contributor: Saleh Lardhi
+Files Containing Juicy Info,inurl: /adminer.php,Original Contributor: Satyam Singh
+Files Containing Juicy Info,"intext:""index of"" ""pins"" site:*.com",Original Contributor: Omkar Chavan
+Files Containing Juicy Info,site:*.com */admin.txt,Original Contributor: saurabh kode
+Files Containing Juicy Info,"intext:""Reportico"" site:.com OR site:.org OR site:.net OR site:.gov OR site:.edu",Original Contributor: Aashiq Ahamed
+Files Containing Juicy Info,filetype:txt CLAVE*.txt OR clave*.txt,Original Contributor: Kevin Tupiza
+Files Containing Juicy Info,"inurl:""/wp-includes/user.php"" -site:wordpress.org -site:github.com -site:fossies.org",Original Contributor: Sathish Kishore
+Files Containing Juicy Info,"inurl:""/wp-content/debug.log""",Original Contributor: Sathish Kishore
+Files Containing Juicy Info,"allinurl:""add_vhost.php?lang=english""",Original Contributor: Saleh Lardhi
+Files Containing Juicy Info,inurl:signup | inurl:sign-up | inurl:register | inurl:registration,Original Contributor: Qais Qais
+Files Containing Juicy Info,site:*.edu.* inurl:globalprotect,Original Contributor: Connect2maviya
+Files Containing Juicy Info,"intitle:""index of""Eventlog Analyzer",Original Contributor: Connect2maviya
+Files Containing Juicy Info,"intitle:""index of"" private",Original Contributor: slacker pwns
+Files Containing Juicy Info,inurl:adminpanel site:*.* -site:github.com,Original Contributor: Anas Zakir
+Files Containing Juicy Info,"inurl:""/database.json""",Original Contributor: Raouf
+Files Containing Juicy Info,"intitle:""index of"" ""*robots.txt"" site:.edu",Original Contributor: Safein Sadad
+Pages Containing Login Portals,site:.com inurl:login | inurl:logon | inurl:sign-in | inurl:signin | inurl:portal,Original Contributor: Qais Qais
+Various Online Devices,"intitle:""Webcam"" inurl:WebCam.htm",Original Contributor: s Thakur
+Files Containing Juicy Info,"intitle:""Index of /flipbook""",Original Contributor: Kamran Saifullah
+Files Containing Juicy Info,"intitle:""index of"" ec2 -aws",Original Contributor: Esteban Brenes Segura
+Files Containing Juicy Info,"inurl:""/bitrix/redirect.php?goto=""",Original Contributor: Kurmasheva Tatiana
+Files Containing Juicy Info,"intitle:""index of"" ""plesk-stat""",Original Contributor: Praharsh Kumar Singh
+Files Containing Juicy Info,"intitle:""Index of /biuro""",Original Contributor: Kamran Saifullah
+Files Containing Juicy Info,"intitle:""Index of /app/webroot/img""",Original Contributor: Kamran Saifullah
+Files Containing Juicy Info,"intitle:""index of"" graphql-api",Original Contributor: Esteban Brenes Segura
+Files Containing Juicy Info,inurl:/admin.php,Original Contributor: Aashiq Ahamed
+Files Containing Juicy Info,"inurl: ""index of"" ""phpstan.neon""",Original Contributor: Mark Ivan David
+Files Containing Juicy Info,"intitle:""Index of /databases""",Original Contributor: Sayed Recover
+Pages Containing Login Portals,"intitle:""cs141 webmanager""",Original Contributor: Louise E
+Pages Containing Login Portals,inurl:/restgui/start.html,Original Contributor: Louise E
+Files Containing Juicy Info,"inurl:""/cgi-bin/home.ha""",Original Contributor: Louise E
+Files Containing Juicy Info,"site:www.openbugbounty.org intext:""xss"" intext:""Unpatched""",Original Contributor: Sachin Gupta
+Files Containing Juicy Info,"intitle:""index of"" mysql inurl:./db/",Original Contributor: Rahul Thakur
+Files Containing Juicy Info,"intitle: ""index of"" administrator",Original Contributor: Rahul Thakur
+Files Containing Juicy Info,intitle:index.of./.database,Original Contributor: Rahul Thakur
+Pages Containing Login Portals,"intitle:""Login - Jorani""",Original Contributor: Bipin Jitiya
+Pages Containing Login Portals,"site:..us inurl:""login.php""",Original Contributor: Husain Ahmad
+Pages Containing Login Portals,"intitle:""Unibox Administration""",Original Contributor: Hetkumar Desai
+Files Containing Juicy Info,"intitle:""index of"" ""about-me""",Original Contributor: Safein Sadad
+Files Containing Juicy Info,"inurl:""xslt?PAGE=C_4_0""",Original Contributor: Reza Abasi
+Files Containing Juicy Info,"intitle:""index of"" ""/userlist/""",Original Contributor: Md.Tariqul Islam Hasanat
+Files Containing Juicy Info,inurl:login/login-user,Original Contributor: Faridul Hasan
+Files Containing Juicy Info,"intitle:""index of"" ""login"" site:bd",Original Contributor: Faridul Hasan
+Vulnerable Files,"intitle:""index of"" ""*.phtml"" site:.edu",Original Contributor: Ali Ahamed
+Files Containing Juicy Info,"intitle:""Error log for /LM/"".edu",Original Contributor: Neyamul Haque
+Pages Containing Login Portals,"intitle:""online portal login""",Original Contributor: Safein Sadad
+Files Containing Juicy Info,intitle:index.of intext:log site:.bd,Original Contributor: Khandaker Mahidul Islam
+Files Containing Juicy Info,"inurl:""/login.php"" intitle:""admin""",Original Contributor: Aashiq Ahamed
+Files Containing Juicy Info,"intitle:""index of"" intext: ""login.php""",Original Contributor: Avdhut Hadkar
+Files Containing Juicy Info,"site:linkedin.com intitle:""@gmail""",Original Contributor: Shiva Medituru
+Files Containing Juicy Info,"intitle:""index of"" ""postman_collection.json""",Original Contributor: Chinmay Divekar
+Files Containing Juicy Info,site:.com inurl:/signup.aspx,Original Contributor: Mayuresh Gadhekar
+Pages Containing Login Portals,"inurl:""/spotfire/login.html""",Original Contributor: Chinmay Divekar
+Files Containing Juicy Info,"intitle:""index of"" ""login.php.txt""",Original Contributor: Aashiq Ahamed
+Files Containing Juicy Info,"intitle:""index of"" ""bugs.txt""",Original Contributor: Ranjeet Jaiswal
+Files Containing Juicy Info,"intitle:""Documentation Index"" intext:""Apache Tomcat Servlet"" inurl:""docs""",Original Contributor: Nullfuzz
+Files Containing Juicy Info,"intitle:""index of"" ""domain.txt""",Original Contributor: Ranjeet Jaiswal
+Files Containing Juicy Info,"intitle:""index of"" ""C:Windows""",Original Contributor: Aashiq Ahamed
+Pages Containing Login Portals,"allintitle: ""smart office suite - login page""",Original Contributor: Abhilash Gangane
+Files Containing Juicy Info,"intitle:""Index of /api/""",Original Contributor: Kamran Saifullah
+Files Containing Juicy Info,inurl:/phpMyAdmin/index.php?server=1,Original Contributor: Aashiq Ahamed
+Files Containing Juicy Info,inurl:wp-includes,Original Contributor: Jose Rivas Aka. Bl4cksku11
+Files Containing Juicy Info,"inurl:""cf/assets"" ""MultiFileUpload.swf""",Original Contributor: Datain Alexandre
+Files Containing Juicy Info,"intitle:""index of"" "".ssh"" OR ""ssh_config"" OR ""ssh_known_hosts"" OR ""authorized_keys"" OR ""id_rsa"" OR ""id_dsa""",Original Contributor: Ritesh Sahu
+Files Containing Juicy Info,index of: /aadhar,Original Contributor: sai vijay kumar M
+Files Containing Juicy Info,inurl:php?id=1 site:com,Original Contributor: Akshad Joshi
+Pages Containing Login Portals,"inurl:tech ""login""",Original Contributor: Ivan Nizer Gonsalves
+Pages Containing Login Portals,"inurl:""adminLogin/"" intitle:""Admin Panel""",Original Contributor: Jose Rivas Aka. Bl4cksku11
+Pages Containing Login Portals,"intext:""Login"" inurl:/secure",Original Contributor: Shubhranshu Gorai
+Files Containing Juicy Info,allintext:static/uploads,Original Contributor: Affan Ali
+Files Containing Juicy Info,inurl: /default.rdp,Original Contributor: Arjun Vijaypal Singh
+Vulnerable Servers,"inurl:""/geoserver/ows?service=wfs""",Original Contributor: Bipin Jitiya
+Files Containing Juicy Info,inurl:/wp-content/uploads/wpo_wcpdf,Original Contributor: Stuart Steenberg
+Files Containing Juicy Info,"intext:""ArcGIS REST Services Directory"" intitle:""Folder: /""",Original Contributor: Alonso Eduardo Caballero Quezada
+Pages Containing Login Portals,"intitle:""PaperCut login""",Original Contributor: SatishKumar Pyata
+Files Containing Juicy Info,"intext:""index of"" inurl:jwks-rsa",Original Contributor: Praharsh Kumar Singh
+Files Containing Juicy Info,"intitle:""index of"" ""download.php?file=""",Original Contributor: Praharsh Kumar Singh
+Files Containing Juicy Info,"intext:""index of"" inurl:json-rpc",Original Contributor: Praharsh Kumar Singh
+Pages Containing Login Portals,"allintitle:""Opengear Management Console""",Original Contributor: GirlsLearnCyber
+Files Containing Juicy Info,"intext:pom.xml intitle:""index of /""",Original Contributor: Sagar Banwa
+Files Containing Juicy Info,"intext:""Index of"" intext:""backend/""",Original Contributor: PARAG BAGUL
+Files Containing Juicy Info,"intext:""Index of"" intext:""plugin/""",Original Contributor: PARAG BAGUL
+Files Containing Juicy Info,"intext:""Index of"" intext:""/etc""",Original Contributor: PARAG BAGUL
+Pages Containing Login Portals,"inurl: ""/admin"" intitle:""Admin Login""",Original Contributor: Bhavin Amesara
+Pages Containing Login Portals,inurl:cas/login?service=http,Original Contributor: Stuart Steenberg
+Files Containing Juicy Info,"intitle:""index of"" ""properties.json""",Original Contributor: Arnob Biswas
+Files Containing Juicy Info,"inurl:""/private"" intext:""index of /"" inurl:""owncloud"" -litespeed",Original Contributor: Azar Abdulla
+Files Containing Juicy Info,"inurl:""/private"" intext:""index of /"" ""win64"" -litespeed",Original Contributor: Azar A. Nariman
+Files Containing Juicy Info,"inurl:"":8080/"" intext:""index of /"" ""win64"" -LiteSpeed",Original Contributor: Azar A. Nariman
+Files Containing Juicy Info,"inurl:"".ir/"" intext:""index of /"" "".ovpn""",Original Contributor: Azar A. Nariman
+Various Online Devices,"intext:""Please respect other people’s privacy and rights when using product."" hikvision",Original Contributor: Zayed AlJaberi
+Files Containing Juicy Info,"intitle:'Sypex Dumper"" inurl:sxd",Original Contributor: Cyber Cyber
+Files Containing Juicy Info,"intext:""index of"" downloads"" site:*.*",Original Contributor: Monirul Islam
+Files Containing Juicy Info,"intitle:""index of /"" "".apk"" inurl:"".ir/""",Original Contributor: Azar A. Nariman
+Files Containing Juicy Info,"inurl:""/scada-vis""",Original Contributor: Parsa Rezaie Khiabanloo
+Files Containing Juicy Info,inurl:*/signIn.do,Original Contributor: ABHISHEK UZUMAKI
+Pages Containing Login Portals,inurl:/superadmin/login intext:login,Original Contributor: Himanshu Mehta
+Pages Containing Login Portals,"inurl:""/sap/bc/gui/sap/its/webgui?sap-client=SAP*""",Original Contributor: Leonardo Venegas
+Pages Containing Login Portals,"allintitle:""Login | wplogin Login",Original Contributor: Md Hasib
+Files Containing Juicy Info,"intitle:""index of "" ""shell.txt""",Original Contributor: Delowar Hossain
+Files Containing Juicy Info,"intitle:""index of ""conf.json""",Original Contributor: Suman Das
+Files Containing Juicy Info,intitle:index of django/admin site:.*,Original Contributor: Md rofikul
+Pages Containing Login Portals,"allintitle:""MobileIron User Portal: Sign In""",Original Contributor: Heverin Hacker
+Pages Containing Login Portals,"allintitle:""Synapse Mobility Login""",Original Contributor: Heverin Hacker
+Pages Containing Login Portals,"allintitle:""ResolutionMD Login""",Original Contributor: Heverin Hacker
+Files Containing Juicy Info,"allintitle:""VidyoRouter Configuration""",Original Contributor: Heverin Hacker
+Pages Containing Login Portals,inurl:adminpanel site:*.in,Original Contributor: Md rofikul
+Files Containing Juicy Info,"intitle:""index of"" inurl:admin/php",Original Contributor: Md Hasib
+Files Containing Juicy Info,inurl:login/login,Original Contributor: Javier Bernardo
+Files Containing Juicy Info,"inurl: ""phpmyadmin/setup/""",Original Contributor: Arjun Chandarana
+Files Containing Juicy Info,inurl:ssh intitle:index of /files,Original Contributor: PRINCY M JOSE
+Files Containing Juicy Info,"inurl:""/api-docs""",Original Contributor: Arjun Chandarana
+Files Containing Juicy Info,"intitle:""index of"" ""checkout""",Original Contributor: Faizan Akhtar
+Pages Containing Login Portals,inurl:guest/auth_login.php,Original Contributor: Javier Bernardo
+Pages Containing Login Portals,"allintitle:""Login | Control WebPanel"" Control WebPanel Login",Original Contributor: Aditya Raj Singh
+Files Containing Juicy Info,"intitle:""index of"" inurl:wp-json index.json",Original Contributor: Rutvik Jaini
+Various Online Devices,"intitle:""Toshiba Network Camera""",Original Contributor: Shilpa Shaji
+Files Containing Juicy Info,inurl:robots filetype:txt,Original Contributor: Konaté Olivier
+Files Containing Juicy Info,"intitle:""index.of"" *S3",Original Contributor: Ritesh Sahu
+Files Containing Juicy Info,"intitle:""index of"" /etc/shadow",Original Contributor: Husain Saleem
+Files Containing Juicy Info,"intitle:""index of"" inurl:admin/login",Original Contributor: AJAY JOSEPH
+Pages Containing Login Portals,"allintitle:""Cyberoam SSL VPN Portal""",Original Contributor: GirlsLearnCyber
+Files Containing Juicy Info,"allintitle:""ProjectDox Login""",Original Contributor: GirlsLearnCyber
+Files Containing Juicy Info,"intitle:""Index of /cam/""",Original Contributor: Sanu Jose M
+Files Containing Juicy Info,"intitle:""index of"" intext:user inurl:data",Original Contributor: Echo Programs
+Files Containing Juicy Info,index of:admin.asp,Original Contributor: Rhishinathvarma Marimuthu
+Pages Containing Login Portals,"allintitle:""Eclypse Login""",Original Contributor: GirlsLearnCyber
+Pages Containing Login Portals,"allintitle:""TutorTrac Login""",Original Contributor: GirlsLearnCyber
+Pages Containing Login Portals,"allintitle:""OMERO.web - Login""",Original Contributor: GirlsLearnCyber
+Pages Containing Login Portals,"allintitle:""Untangle Administrator Login""",Original Contributor: GirlsLearnCyber
+Pages Containing Login Portals,"allintitle:""eSlideManager - Login""",Original Contributor: GirlsLearnCyber
+Pages Containing Login Portals,"allintitle:""Supermicro BMC Login""",Original Contributor: GirlsLearnCyber
+Pages Containing Login Portals,"allintitle:""Building Operation WebStation""",Original Contributor: GirlsLearnCyber
+Files Containing Juicy Info,Indexof:admin site:*.com,Original Contributor: Alok Bhagat
+Pages Containing Login Portals,"intitle:""Ignition Gateway"" ""launch designer""",Original Contributor: GirlsLearnCyber
+Files Containing Juicy Info,intext:phpMiniAdmin inurl:phpminiadmin ext:php,Original Contributor: Nullfuzz
+Pages Containing Login Portals,inurl:GeminiVAIdServer,Original Contributor: Prayag Mathukiya
+Advisories and Vulnerabilities,"intext:""Powered by Virtual Airlines Manager [v2.6.2]""",Original Contributor: Milad karimi
+Files Containing Juicy Info,"inurl:""/wp-content/plugins/imagemagick-engine/""",Original Contributor: Red Blue Ops
+Files Containing Juicy Info,"intitle:""index of"" intext:""Apache/1.4""",Original Contributor: Ismail Tasdelen
+Files Containing Juicy Info,intitle:index.of intext:log inurl:nasa,Original Contributor: Rhishinathvarma Marimuthu
+Files Containing Juicy Info,"intitle:""index of"" ""admin"" ""cgi-bin""",Original Contributor: Umandon Ardaw
+Various Online Devices,intitle:phaser inurl:/frameprop.htm,Original Contributor: Bilal KUŞ
+Pages Containing Login Portals,inurl:assystnetmob,Original Contributor: Zayed AlJaberi022-06-20
+Files Containing Juicy Info,inurl: wp-content/plugin/404-redirection-manager,Original Contributor: Rutvik Jaini
+Files Containing Juicy Info,intitle:BioTime AND intext:ZKTeco Security LLC,Original Contributor: Robot Shell
+Files Containing Juicy Info,inurl: wp-content/plugin/8-degree-notification-bar,Original Contributor: Rutvik Jaini
+Files Containing Juicy Info,"intext:""index of"" "".git""",Original Contributor: Praharsh Kumar Singh
+Files Containing Juicy Info,"intext:""index of"" ""xmlrpc.php""",Original Contributor: Praharsh Kumar Singh
+Files Containing Juicy Info,"intext:""index of"" ""phpMyAdmin""",Original Contributor: Praharsh Kumar Singh
+Files Containing Juicy Info,"intitle:""Oracle WebLogic Server""",Original Contributor: Eve Cohen
+Files Containing Juicy Info,site:investor.*.* AND inurl:home/default.aspx,Original Contributor: SALAH EDDINE LOUFFIDI
+Files Containing Juicy Info,"intitle:""index of /database/migrations""",Original Contributor: Shuvrosayar Das
+Files Containing Juicy Info,"intitle:""Index of /webcam/""",Original Contributor: Shuvrosayar Das
+Pages Containing Login Portals,"inurl:authorization.do intext:""ADSelfService Plus""",Original Contributor: Stuart Steenberg
+Pages Containing Login Portals,"intitle:""NB1601 Web Manager""",Original Contributor: HackerFrenzy
+Pages Containing Login Portals,"intitle:""Netgate pfSense Plus - Login""",Original Contributor: HackerFrenzy
+Pages Containing Login Portals,"intitle:""Parallels User Portal""",Original Contributor: HackerFrenzy
+Pages Containing Login Portals,"allintitle:""wireless controller login""",Original Contributor: GirlsLearnCyber
+Pages Containing Login Portals,"inurl:""/adfs/ls/""",Original Contributor: Lorenzo Albano Fontanot
+Files Containing Juicy Info,"intitle:""index of"" inurl:superadmin",Original Contributor: Mahedi Hassan
+Files Containing Juicy Info,"intitle:""index of"" inurl:SUID",Original Contributor: Mahedi Hassan
+Files Containing Juicy Info,"intitle:""IIS Windows Server""",Original Contributor: HackerFrenzy
+Advisories and Vulnerabilities,"inurl:""index.php?page=news.php""",Original Contributor: Omar Shash
+Files Containing Juicy Info,inurl:/sym404/root,Original Contributor: Numen Blog
+Files Containing Juicy Info,"intitle: ""index of"" intext: human resources",Original Contributor: Mark Ivan David
+Files Containing Juicy Info,"intitle:""index of""|""access_token.json""",Original Contributor: Leonardo Venegas
+Pages Containing Login Portals,intitle:'olt web management interface',Original Contributor: Cyber Shelby
+Pages Containing Login Portals,"allintitle:""Log on to MACH-ProWeb""",Original Contributor: Under The Sea hacker
+Pages Containing Login Portals,"intitle:""WEB SERVICE"" ""wan"" ""lan"" ""alarm""",Original Contributor: Heverin Hacker
+Sensitive Directories,"intitle:Index of ""/venv""",Original Contributor: Abhishek Singh
+Various Online Devices,inurl:viewer/live/index.html,Original Contributor: Palvinder Singh Secuneus
+Files Containing Juicy Info,"intitle:""index of"" intext:""Apache/2.2.3""",Original Contributor: Wagner Emmanoel de Farias
+Files Containing Juicy Info,"index of:""backtrack"" ""hack"" ext:php",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intitle:""index of"" ""cookies"" ""php""",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intitle:"" TROJANS"" Analysis Report",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intitle:""bugs"" Analysis Report",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intext:""index of"" ""httpclient"" ""login""",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intext:""index of"" ""repository""",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intext:""index of"" ""transaction""",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intext:""index of"" ""phonepe"" ""wp-content""",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intitle:""index of smtp""",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intext: ""admin"" ""subscribe"" filetype:php",Original Contributor: Veeresh Appasaheb Patil
+Files Containing Juicy Info,"intext:""index of"" ""ipaddress""",Original Contributor: Veeresh Appasaheb Patil
+Pages Containing Login Portals,"intitle:""Device(IP CAMERA)"" ""language"" -com|net",Original Contributor: s Thakur
+Pages Containing Login Portals,"intext:""login to authorize"" ""DynDNS""",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""Synnefo Admin""",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""User Authentication : IR*""",Original Contributor: Luke Stark
+Various Online Devices,"intitle:""Pi-hole-ip"" inurl:admin",Original Contributor: s Thakur
+Various Online Devices,"intitle:""NoVus IP camera"" -com",Original Contributor: s Thakur
+Various Online Devices,"intitle:""Gargoyle Router Management Utility"" -com|net",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""Login page for"" inurl:user.cgi",Original Contributor: s Thakur
+Pages Containing Login Portals,"intext:""change your SurgeMAIL account settings""",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""Oracle Access Management"" ""login"" -inurl:oracle",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""Login to Redash""",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""Login to ICC PRO system""",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""Login - Residential Gateway""",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""System Administration"" inurl:top.cgi",Original Contributor: s Thakur
+Various Online Devices,"intitle:""Network Camera"" inurl:main.cgi",Original Contributor: s Thakur
+Pages Containing Login Portals,"intitle:""Login"" -com ""/doc/page/login.asp""",Original Contributor: s Thakur
+Pages Containing Login Portals,"inurl:_admin ""login""",Original Contributor: s Thakur
+Various Online Devices,"intitle:""Roteador Wireless"" inurl:login.asp",Original Contributor: s Thakur
+Various Online Devices,"intitle:""web server login"" ""please enter your login""",Original Contributor: s Thakur
+Files Containing Juicy Info,inurl:/admin ext:config,Original Contributor: Ranjeet Jaiswal
+Pages Containing Login Portals,"intitle:""JupyterHub"" inurl:/hub/login",Original Contributor: s Thakur
+Pages Containing Login Portals,"inurl:""/index.php?qa=login""",Original Contributor: Reza Abasi
+Files Containing Juicy Info,"intext:""index of /"" ""server at""",Original Contributor: Shehzad Soni
+Files Containing Juicy Info,"intitle: index of ""awstats""",Original Contributor: luis De la Rosa
+Pages Containing Login Portals,intitle:[TM4Web] inurl:login.msw,Original Contributor: Lutzenfried
+Files Containing Juicy Info,"intitle:""Index of /"" inurl:(resume|cv)",Original Contributor: Sandesh Ajgekar
+Files Containing Juicy Info,"intitle:""index of"" include/",Original Contributor: Rejul Raghu
+Files Containing Juicy Info,"intitle:""index of"" /gscloud",Original Contributor: Christian Galvan
+Files Containing Juicy Info,"intitle:""index of"" aws/",Original Contributor: Christian Galvan
+Files Containing Juicy Info,"site:.com intitle:""index of"" /ipa",Original Contributor: Simone Gasparato
+Files Containing Juicy Info,site:cloudfront.net inurl:d,Original Contributor: Juan Christian
+Files Containing Juicy Info,site:amazonaws.com inurl:elb.amazonaws.com,Original Contributor: Juan Christian
+Pages Containing Login Portals,sap/bc/ui5_ui5/ui2/ushell/shells/abap/FioriLaunchpad.html -site:sap.com,Original Contributor: Pablo Salinas
