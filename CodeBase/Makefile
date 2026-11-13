@@ -1,4 +1,4 @@
-.PHONY: setup build run serve cli simulate test fmt clean
+.PHONY: setup build run serve status stop restart cli simulate test package fmt clean
 
 setup:
 	@./dev.sh setup
@@ -12,6 +12,15 @@ run:
 serve:
 	@./dev.sh serve
 
+status:
+	@./dev.sh status
+
+stop:
+	@./dev.sh stop
+
+restart:
+	@./dev.sh restart
+
 cli:
 	@./dev.sh cli
 
@@ -20,6 +29,9 @@ simulate:
 
 test:
 	@./dev.sh test
+
+package:
+	@./dev.sh package
 
 fmt:
 	@./dev.sh fmt

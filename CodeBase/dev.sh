@@ -31,23 +31,43 @@ BIND_ADDR="${AUTODORKER_BIND_ADDR:-127.0.0.1:8090}"
 DB_PATH="${AUTODORKER_DB_PATH:-${SCRIPT_DIR}/data/autodorker_state.db}"
 DORK_CSV="${AUTODORKER_DORKSET_PATH:-${SCRIPT_DIR}/../Docs/DorkSet.csv}"
 
-init_secure_runtime_dir() {
-    # CWE-377 Mitigation: Refuse symlinked cache/log/pid paths and enforce 0700 permissions
-    if [ -L "$CACHE_DIR" ]; then
-        printf '[ERR_HALT] Security violation: %s is a symbolic link (CWE-377).\n' "$CACHE_DIR" >&2
-        exit 1
-    fi
-    mkdir -p "$CACHE_DIR"
-    chmod 0700 "$CACHE_DIR"
-
-    for f in "$LOG_FILE" "$PID_FILE"; do
-        if [ -L "$f" ]; then
-            printf '[ERR_HALT] Security violation: %s is a symbolic link (CWE-377).\n' "$f" >&2
+check_runtime_symlinks() {
+    # CWE-377 Mitigation: Refuse symlinked cache/log/pid paths before reading or writing.
+    for path in "$CACHE_DIR" "$LOG_FILE" "$PID_FILE"; do
+        if [ -L "$path" ]; then
+            printf '[ERR_HALT] Security violation: %s is a symbolic link (CWE-377).\n' "$path" >&2
             exit 1
         fi
     done
+}
+
+init_secure_runtime_dir() {
+    check_runtime_symlinks
+    mkdir -p "$CACHE_DIR"
+    chmod 0700 "$CACHE_DIR"
     umask 0077
-    : > "$LOG_FILE"
+}
+
+get_live_gateway_pid() {
+    [ -f "$PID_FILE" ] || return 1
+    [ ! -L "$PID_FILE" ] || return 1
+    CAND_PID=$(tr -d '[:space:]' < "$PID_FILE" 2>/dev/null || true)
+    case "$CAND_PID" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    kill -0 "$CAND_PID" 2>/dev/null || return 1
+    # Verify PID belongs to gateway (avoid false lock on recycled PIDs after reboot).
+    if [ -r "/proc/${CAND_PID}/comm" ]; then
+        PROC_COMM=$(cat "/proc/${CAND_PID}/comm" 2>/dev/null || true)
+    elif command -v ps >/dev/null 2>&1; then
+        PROC_COMM=$(ps -p "$CAND_PID" -o comm= 2>/dev/null || true)
+    else
+        PROC_COMM="gateway"
+    fi
+    case "$PROC_COMM" in
+        *gateway*) printf '%s\n' "$CAND_PID"; return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 ensure_venv() {
@@ -99,6 +119,39 @@ cmd_build() {
     printf '[OK] Polyglot binaries staged in ./bin/\n'
 }
 
+cmd_status() {
+    check_runtime_symlinks
+    LIVE_PID=$(get_live_gateway_pid || true)
+    if [ -n "$LIVE_PID" ]; then
+        printf '[STATUS] AutoDorker gateway running (PID %s) -> http://%s (log: %s)\n' "$LIVE_PID" "$BIND_ADDR" "$LOG_FILE"
+        return 0
+    fi
+    printf '[STATUS] AutoDorker gateway stopped.\n'
+}
+
+cmd_stop() {
+    check_runtime_symlinks
+    LIVE_PID=$(get_live_gateway_pid || true)
+    if [ -z "$LIVE_PID" ]; then
+        rm -f "$PID_FILE"
+        printf '[STOP] No running AutoDorker gateway found.\n'
+        return 0
+    fi
+    printf '[STOP] Stopping AutoDorker gateway PID %s...\n' "$LIVE_PID"
+    kill -TERM "$LIVE_PID" 2>/dev/null || true
+    WAIT_ITERS=0
+    while kill -0 "$LIVE_PID" 2>/dev/null && [ "$WAIT_ITERS" -lt 10 ]; do
+        sleep 1
+        WAIT_ITERS=$((WAIT_ITERS + 1))
+    done
+    if kill -0 "$LIVE_PID" 2>/dev/null; then
+        printf '[WARN] Gateway PID %s did not exit cleanly on SIGTERM; inspect process manually.\n' "$LIVE_PID" >&2
+        exit 1
+    fi
+    rm -f "$PID_FILE"
+    printf '[STOP] Gateway stopped and PID lock cleared.\n'
+}
+
 cmd_run() {
     init_secure_runtime_dir
     ensure_venv
@@ -106,14 +159,15 @@ cmd_run() {
         cmd_build
     fi
 
-    # CWE-114 PID lock check
-    if [ -f "$PID_FILE" ]; then
-        OLD_PID=$(cat "$PID_FILE" 2>/dev/null || true)
-        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-            printf '[ERR_HALT] Gateway already running with PID %s (CWE-114).\n' "$OLD_PID" >&2
-            exit 1
-        fi
+    # CWE-114 PID lock check BEFORE resetting session.log so live gateway logs remain intact.
+    OLD_PID=$(get_live_gateway_pid || true)
+    if [ -n "$OLD_PID" ]; then
+        printf '[ERR_HALT] Gateway already running with PID %s (CWE-114).\n' "$OLD_PID" >&2
+        printf '[HINT] Open http://%s // Lifecycle: ./dev.sh status | ./dev.sh stop | ./dev.sh restart\n' "$BIND_ADDR" >&2
+        exit 1
     fi
+    rm -f "$PID_FILE"
+    : > "$LOG_FILE"
 
     printf '[LAUNCH] Binding %s strictly to http://%s\n' "$APP_NAME" "$BIND_ADDR"
     AUTODORKER_DB_PATH="$DB_PATH" ./bin/gateway --bind "$BIND_ADDR" >>"$LOG_FILE" 2>&1 &
@@ -123,6 +177,11 @@ cmd_run() {
     trap 'rm -f "$PID_FILE"; kill "$GATEWAY_PID" 2>/dev/null || true' INT TERM
     wait "$GATEWAY_PID"
     rm -f "$PID_FILE"
+}
+
+cmd_restart() {
+    cmd_stop
+    cmd_run
 }
 
 cmd_cli() {
@@ -189,13 +248,16 @@ case "${1:-help}" in
     setup) cmd_setup ;;
     build) cmd_build ;;
     run|serve) cmd_run ;;
+    status) cmd_status ;;
+    stop) cmd_stop ;;
+    restart) cmd_restart ;;
     cli) shift; cmd_cli "${1:-}" ;;
     simulate) cmd_simulate ;;
     test) cmd_test ;;
     package) shift; cmd_package "${1:-}" ;;
     fmt) cmd_fmt ;;
     *)
-        printf 'Usage: %s {setup|build|run|serve|cli [url]|simulate|test|package [out.tar.gz]|fmt}\n' "$0"
+        printf 'Usage: %s {setup|build|run|serve|status|stop|restart|cli [url]|simulate|test|package [out.tar.gz]|fmt}\n' "$0"
         exit 1
         ;;
 esac

@@ -187,12 +187,12 @@ flowchart LR
 
 ### 4.2 Build, Orchestration & Shell Scripts (`CodeBase/`)
 
-#### `CodeBase/dev.sh` (201 lines) & `CodeBase/launcher.sh` (34 lines)
-- **What it does:** Implements `CN-DIR-2026-004` subcommands: `setup`, `build`, `run`/`serve`, `cli [url]`, `simulate`, `test`, `package [out.tar.gz]`, `fmt`. Guards against unnecessary `sudo` execution (`SUDO_USER` check halting with unprivileged usage hint so `~/.cargo` isn't hidden and root-owned artifacts aren't created), prepends `/usr/local/go/bin` and `${CARGO_HOME:-$HOME/.cargo}/bin` to `PATH`, enforces `require_tools()` preflight checks, and locks `Cargo.lock` builds (`cargo build --release --locked`). `init_secure_runtime_dir()` blocks symlinks (`[ -L ... ]` for `CWE-377`), enforces `0700` on `~/.cache/autodorker`, `umask 0077`, and PID locking (`gateway.pid` for `CWE-114`). `cmd_build()` builds Release Rust (`cargo build --release --locked`), builds FIPS-140 Go (`GOFIPS=1 GOFIPS140=v1.0.0 go build -ldflags="-s -w"`), ingests `DorkSet.csv`, and regenerates SBOMs.
-- **How to modify:** Edit `BIND_ADDR`, `DB_PATH`, or `DORK_CSV` default fallbacks near lines 17–19 (overridable via `AUTODORKER_BIND_ADDR`, `AUTODORKER_DB_PATH`, `AUTODORKER_DORKSET_PATH`). Mirror any new subcommands in both `dev.bat` and `launcher.sh`/`launcher.bat`.
+#### `CodeBase/dev.sh` (263 lines) & `CodeBase/launcher.sh` (42 lines)
+- **What it does:** Implements `CN-DIR-2026-004` subcommands: `setup`, `build`, `run`/`serve`, `status`, `stop`, `restart`, `cli [url]`, `simulate`, `test`, `package [out.tar.gz]`, `fmt`. Guards against unnecessary `sudo` execution (`SUDO_USER` check halting with unprivileged usage hint so `~/.cargo` isn't hidden and root-owned artifacts aren't created), prepends `/usr/local/go/bin` and `${CARGO_HOME:-$HOME/.cargo}/bin` to `PATH`, enforces `require_tools()` preflight checks, and locks `Cargo.lock` builds (`cargo build --release --locked`). `check_runtime_symlinks()` / `init_secure_runtime_dir()` block symlinks (`CWE-377`) and enforce `0700` on `~/.cache/autodorker`, `umask 0077`, and PID locking (`gateway.pid` verified via `/proc/<pid>/comm` for `CWE-114`) BEFORE truncating `session.log` so running instances retain their logs. `cmd_build()` builds Release Rust (`cargo build --release --locked`), builds FIPS-140 Go (`GOFIPS=1 GOFIPS140=v1.0.0 go build -ldflags="-s -w"`), ingests `DorkSet.csv`, and regenerates SBOMs.
+- **How to modify:** Edit `BIND_ADDR`, `DB_PATH`, or `DORK_CSV` default fallbacks near lines 30–32 (overridable via `AUTODORKER_BIND_ADDR`, `AUTODORKER_DB_PATH`, `AUTODORKER_DORKSET_PATH`). Mirror any new subcommands in both `dev.bat` and `launcher.sh`/`launcher.bat`.
 
-#### `CodeBase/dev.bat` (138 lines), `CodeBase/launcher.bat` (25 lines) & `CodeBase/Makefile` (28 lines)
-- **What they do:** `dev.bat` and `launcher.bat` provide Windows 10/11 command parity using `%LOCALAPPDATA%\autodorker` and `.venv\Scripts\`, including `cmd_package` (`bin\gateway.exe --package-release`) and pure-Python `--telemetry-status` / `--backup-sign` execution in `cmd_cli`. `Makefile` exposes `make setup|build|run|serve|cli|simulate|test|fmt|clean` delegating directly to `./dev.sh`.
+#### `CodeBase/dev.bat` (138 lines), `CodeBase/launcher.bat` (25 lines) & `CodeBase/Makefile` (40 lines)
+- **What they do:** `dev.bat` and `launcher.bat` provide Windows 10/11 command parity using `%LOCALAPPDATA%\autodorker` and `.venv\Scripts\`, including `cmd_package` (`bin\gateway.exe --package-release`) and pure-Python `--telemetry-status` / `--backup-sign` execution in `cmd_cli`. `Makefile` exposes `make setup|build|run|serve|status|stop|restart|cli|simulate|test|package|fmt|clean` delegating directly to `./dev.sh`.
 - **How to modify:** Keep `dev.bat` subcommand labels aligned 1:1 with `dev.sh`.
 
 #### `CodeBase/scripts/sys_telemetry.sh` (36 lines)
@@ -343,6 +343,9 @@ cd CodeBase
 ./dev.sh simulate               # Run ephemeral mock HTTP + live Gateway + AST + Export E2E suite
 ./dev.sh package [out.tar.gz]   # Bundle standalone archive/tar release with embedded UI
 ./dev.sh run                    # Launch loopback gateway at http://127.0.0.1:8090
+./dev.sh status                 # Show running gateway PID, URL, and session.log path
+./dev.sh stop                   # Gracefully stop the running gateway via PID lock
+./dev.sh restart                # Stop any active gateway and launch fresh binaries
 ./dev.sh fmt                    # Format Rust and Go source files
 ```
 
