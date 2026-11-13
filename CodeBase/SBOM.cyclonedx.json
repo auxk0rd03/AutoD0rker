@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:1399b56e-8c28-4dae-a330-0ae85112025b",
+  "serialNumber": "urn:uuid:437a82f2-fd66-439e-a793-a2c1fa130dac",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-13T04:31:01Z",
+    "timestamp": "2026-11-13T04:47:30Z",
     "component": {
       "type": "application",
       "name": "AutoDorker",

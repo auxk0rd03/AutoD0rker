@@ -1,6 +1,6 @@
 # AutoDorker Software Bill of Materials (SBOM)
 
-- **Generated (UTC)**: `2026-11-13T04:31:01Z`
+- **Generated (UTC)**: `2026-11-13T04:47:30Z`
 - **Project**: `AutoDorker v1.0.0` (CyberNest Holdings LLC - Labs Department)
 - **Go Gateway (`cmd/gateway/`)**: Standard Library Only (zero third-party Go modules; `GOFIPS=1` / `GOFIPS140=v1.0.0`)
 

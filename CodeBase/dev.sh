@@ -5,10 +5,23 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$SCRIPT_DIR"
 
-if ! command -v go >/dev/null 2>&1 && [ -x "/usr/local/go/bin/go" ]; then
-    PATH="$PATH:/usr/local/go/bin"
-    export PATH
+# AutoDorker runs strictly unprivileged on 127.0.0.1:8090; running under sudo resets PATH/HOME (hiding ~/.cargo/bin) and creates root-owned artifacts.
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    printf '[ERR_HALT] Do not run %s with sudo (AutoDorker binds unprivileged 127.0.0.1:8090 and uses user-scoped ~/.cargo + .venv).\n' "$0" >&2
+    printf '[HINT] Re-run without sudo as %s: ./dev.sh %s\n' "$SUDO_USER" "${1:-build}" >&2
+    exit 1
 fi
+
+prepend_path_dir() {
+    [ -d "$1" ] || return 0
+    case ":$PATH:" in
+        *":$1:"*) ;;
+        *) PATH="$1:$PATH"; export PATH ;;
+    esac
+}
+
+prepend_path_dir "/usr/local/go/bin"
+prepend_path_dir "${CARGO_HOME:-$HOME/.cargo}/bin"
 
 APP_NAME="autodorker"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/${APP_NAME}"
@@ -46,22 +59,27 @@ ensure_venv() {
     fi
 }
 
-cmd_setup() {
-    printf '[SETUP] Checking toolchain prerequisites (go, cargo, python3)...\n'
-    for tool in go cargo rustc python3; do
+require_tools() {
+    for tool in "$@"; do
         if ! command -v "$tool" >/dev/null 2>&1; then
-            printf '[ERR_HALT] Required tool missing: %s\n' "$tool" >&2
+            printf '[ERR_HALT] Required tool missing from PATH: %s (check ~/.cargo/bin and /usr/local/go/bin)\n' "$tool" >&2
             exit 1
         fi
     done
+}
+
+cmd_setup() {
+    printf '[SETUP] Checking toolchain prerequisites (go, cargo, rustc, python3)...\n'
+    require_tools go cargo rustc python3
     ensure_venv
     mkdir -p bin data/backups data/Output
     printf '[OK] Toolchain and .venv verified.\n'
 }
 
 cmd_build() {
+    require_tools cargo rustc go
     printf '[BUILD] Compiling Rust dork_spider engine (release)...\n'
-    (cd crates/dork_spider && cargo build --release)
+    (cd crates/dork_spider && cargo build --release --locked)
     mkdir -p bin
     cp crates/dork_spider/target/release/dork_spider bin/dork_spider
     chmod 0750 bin/dork_spider
@@ -133,6 +151,7 @@ cmd_simulate() {
 }
 
 cmd_test() {
+    require_tools cargo go python3
     ensure_venv
     printf '[TEST] Running Rust AST & Shannon Entropy suite (cargo test)...\n'
     (cd crates/dork_spider && cargo test --locked)
@@ -147,6 +166,7 @@ cmd_test() {
 }
 
 cmd_fmt() {
+    require_tools cargo gofmt go
     printf '[FMT] Formatting Rust & Go source trees...\n'
     (cd crates/dork_spider && cargo fmt)
     gofmt -w webassets.go

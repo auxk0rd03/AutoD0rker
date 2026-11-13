@@ -187,8 +187,8 @@ flowchart LR
 
 ### 4.2 Build, Orchestration & Shell Scripts (`CodeBase/`)
 
-#### `CodeBase/dev.sh` (181 lines) & `CodeBase/launcher.sh` (34 lines)
-- **What it does:** Implements `CN-DIR-2026-004` subcommands: `setup`, `build`, `run`/`serve`, `cli [url]`, `simulate`, `test`, `package [out.tar.gz]`, `fmt`. Auto-adds `/usr/local/go/bin` to `PATH` when `go` is absent from default `PATH`. `init_secure_runtime_dir()` blocks symlinks (`[ -L ... ]` for `CWE-377`), enforces `0700` on `~/.cache/autodorker`, `umask 0077`, and PID locking (`gateway.pid` for `CWE-114`). `cmd_build()` builds Release Rust (`cargo build --release`), builds FIPS-140 Go (`GOFIPS=1 GOFIPS140=v1.0.0 go build -ldflags="-s -w"`), ingests `DorkSet.csv`, and regenerates SBOMs.
+#### `CodeBase/dev.sh` (201 lines) & `CodeBase/launcher.sh` (34 lines)
+- **What it does:** Implements `CN-DIR-2026-004` subcommands: `setup`, `build`, `run`/`serve`, `cli [url]`, `simulate`, `test`, `package [out.tar.gz]`, `fmt`. Guards against unnecessary `sudo` execution (`SUDO_USER` check halting with unprivileged usage hint so `~/.cargo` isn't hidden and root-owned artifacts aren't created), prepends `/usr/local/go/bin` and `${CARGO_HOME:-$HOME/.cargo}/bin` to `PATH`, enforces `require_tools()` preflight checks, and locks `Cargo.lock` builds (`cargo build --release --locked`). `init_secure_runtime_dir()` blocks symlinks (`[ -L ... ]` for `CWE-377`), enforces `0700` on `~/.cache/autodorker`, `umask 0077`, and PID locking (`gateway.pid` for `CWE-114`). `cmd_build()` builds Release Rust (`cargo build --release --locked`), builds FIPS-140 Go (`GOFIPS=1 GOFIPS140=v1.0.0 go build -ldflags="-s -w"`), ingests `DorkSet.csv`, and regenerates SBOMs.
 - **How to modify:** Edit `BIND_ADDR`, `DB_PATH`, or `DORK_CSV` default fallbacks near lines 17–19 (overridable via `AUTODORKER_BIND_ADDR`, `AUTODORKER_DB_PATH`, `AUTODORKER_DORKSET_PATH`). Mirror any new subcommands in both `dev.bat` and `launcher.sh`/`launcher.bat`.
 
 #### `CodeBase/dev.bat` (138 lines), `CodeBase/launcher.bat` (25 lines) & `CodeBase/Makefile` (28 lines)
