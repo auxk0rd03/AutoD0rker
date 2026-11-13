@@ -4,14 +4,16 @@ use crate::entropy::{dom_tag_simhash, format_simhash_hex, shannon_entropy_bps};
 use rand::Rng;
 use regex::Regex;
 use scraper::{Html, Selector};
-use std::collections::{HashSet, VecDeque};
+use serde::Deserialize;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use url::Url;
@@ -36,6 +38,38 @@ pub struct SpiderConfig {
     pub engagement_id: Option<String>,
     pub harvest_dir: Option<PathBuf>,
     pub keep_harvest: bool,
+    pub jitter_min_ms: u64,
+    pub jitter_max_ms: u64,
+    pub proxy_url: Option<String>,
+    pub custom_wordlist: Vec<String>,
+    pub spa_seed_path: Option<PathBuf>,
+}
+
+impl Default for SpiderConfig {
+    fn default() -> Self {
+        Self {
+            target_url: String::new(),
+            max_depth: 2,
+            stealth_mode: true,
+            allow_local_staging: false,
+            engagement_id: None,
+            harvest_dir: None,
+            keep_harvest: false,
+            jitter_min_ms: PROBE_JITTER_MIN_MS,
+            jitter_max_ms: PROBE_JITTER_MAX_MS,
+            proxy_url: None,
+            custom_wordlist: Vec::new(),
+            spa_seed_path: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SpaSeedPayload {
+    final_url: Option<String>,
+    hydrated_html: Option<String>,
+    #[serde(default)]
+    xhr_urls: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,23 +109,134 @@ pub fn is_blocked_ip(ip: IpAddr, allow_local_staging: bool) -> bool {
             if allow_local_staging {
                 return false;
             }
-            v4.is_loopback() || v4.is_private()
+            // RFC 6598 CGNAT 100.64.0.0/10
+            let is_cgnat = octets[0] == 100 && (octets[1] & 0xC0) == 64;
+            v4.is_loopback() || v4.is_private() || is_cgnat
         }
         IpAddr::V6(v6) => {
-            if v6.is_unspecified() || v6.is_multicast() {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(IpAddr::V4(mapped), allow_local_staging);
+            }
+            if v6.is_unspecified() || v6.is_multicast() || (v6.segments()[0] & 0xffc0) == 0xfe80 {
                 return true;
             }
             if allow_local_staging {
                 return false;
             }
-            v6.is_loopback()
-                || (v6.segments()[0] & 0xfe00) == 0xfc00
-                || (v6.segments()[0] & 0xffc0) == 0xfe80
+            v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00
         }
     }
 }
 
+/// Custom DNS pinning resolver wired directly into `ureq::AgentBuilder::resolver`
+/// to eliminate TOCTOU DNS-rebinding windows between SSRF checks and TCP connect.
+#[derive(Clone)]
+pub struct PinnedSsrfResolver {
+    allow_local_staging: bool,
+    pinned: Arc<Mutex<HashMap<String, Vec<SocketAddr>>>>,
+}
+
+impl PinnedSsrfResolver {
+    pub fn new(allow_local_staging: bool) -> Self {
+        Self {
+            allow_local_staging,
+            pinned: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn resolve_and_pin(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+        let lower_host = host.trim_matches(&['[', ']'][..]).to_ascii_lowercase();
+        if lower_host == "metadata.google.internal" || lower_host.ends_with(".internal") {
+            return Err("Cloud metadata endpoint blocked by SSRF policy".to_string());
+        }
+        let cache_key = format!("{}:{}", lower_host, port);
+        {
+            let guard = self.pinned.lock().unwrap();
+            if let Some(addrs) = guard.get(&cache_key) {
+                return Ok(addrs.clone());
+            }
+        }
+
+        if let Ok(ip) = lower_host.parse::<IpAddr>() {
+            if is_blocked_ip(ip, self.allow_local_staging) {
+                return Err(format!("Blocked IP address {} (SSRF policy)", ip));
+            }
+            let pinned_addrs = vec![SocketAddr::new(ip, port)];
+            self.pinned
+                .lock()
+                .unwrap()
+                .insert(cache_key, pinned_addrs.clone());
+            return Ok(pinned_addrs);
+        }
+
+        let mut addrs: Vec<SocketAddr> = (lower_host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|e| format!("DNS resolution failed for {}: {}", host, e))?
+            .collect();
+
+        if addrs.is_empty() {
+            return Err(format!("No IP addresses resolved for {}", host));
+        }
+
+        for addr in &addrs {
+            if is_blocked_ip(addr.ip(), self.allow_local_staging) {
+                return Err(format!(
+                    "Resolved IP {} for {} violates SSRF policy",
+                    addr.ip(),
+                    host
+                ));
+            }
+        }
+
+        // Prefer IPv4 first so hosts with unreachable IPv6 routes connect over IPv4 reliably.
+        addrs.sort_by_key(|a| if a.is_ipv4() { 0u8 } else { 1u8 });
+        self.pinned.lock().unwrap().insert(cache_key, addrs.clone());
+        Ok(addrs)
+    }
+
+    pub fn pinned_ips_for(&self, host: &str, port: u16) -> Vec<IpAddr> {
+        let lower_host = host.trim_matches(&['[', ']'][..]).to_ascii_lowercase();
+        let cache_key = format!("{}:{}", lower_host, port);
+        let guard = self.pinned.lock().unwrap();
+        guard
+            .get(&cache_key)
+            .map(|list| list.iter().map(|s| s.ip()).collect())
+            .unwrap_or_default()
+    }
+}
+
+impl ureq::Resolver for PinnedSsrfResolver {
+    fn resolve(&self, netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
+        let (host, port) = if let Ok(sa) = netloc.parse::<SocketAddr>() {
+            (sa.ip().to_string(), sa.port())
+        } else if let Some((h, p_str)) = netloc.rsplit_once(':') {
+            let p = p_str.parse::<u16>().map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
+            })?;
+            (h.to_string(), p)
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Missing port in netloc: {}", netloc),
+            ));
+        };
+
+        self.resolve_and_pin(&host, port)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))
+    }
+}
+
 pub fn verify_url_ssrf(raw_url: &str, allow_local_staging: bool) -> Result<Url, String> {
+    let resolver = PinnedSsrfResolver::new(allow_local_staging);
+    verify_url_ssrf_pinned(raw_url, allow_local_staging, &resolver, false)
+}
+
+pub fn verify_url_ssrf_pinned(
+    raw_url: &str,
+    allow_local_staging: bool,
+    resolver: &PinnedSsrfResolver,
+    allow_proxy_dns: bool,
+) -> Result<Url, String> {
     let parsed = Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("Only http and https schemes are permitted".to_string());
@@ -99,52 +244,132 @@ pub fn verify_url_ssrf(raw_url: &str, allow_local_staging: bool) -> Result<Url, 
     let host = parsed
         .host_str()
         .ok_or_else(|| "Missing host in URL".to_string())?;
-    let lower_host = host.to_ascii_lowercase();
+    let lower_host = host.trim_matches(&['[', ']'][..]).to_ascii_lowercase();
     if lower_host == "metadata.google.internal" || lower_host.ends_with(".internal") {
         return Err("Cloud metadata endpoint blocked by SSRF policy".to_string());
     }
     let port = parsed.port_or_known_default().unwrap_or(443);
-    if let Ok(ip) = host.parse::<IpAddr>() {
+    if let Ok(ip) = lower_host.parse::<IpAddr>() {
         if is_blocked_ip(ip, allow_local_staging) {
             return Err(format!("Blocked IP address {} (SSRF policy)", ip));
         }
+        let _ = resolver.resolve_and_pin(host, port);
         return Ok(parsed);
     }
-    let addrs = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("DNS resolution failed for {}: {}", host, e))?;
-    let mut resolved_any = false;
-    for addr in addrs {
-        resolved_any = true;
-        if is_blocked_ip(addr.ip(), allow_local_staging) {
-            return Err(format!(
-                "Resolved IP {} for {} violates SSRF policy",
-                addr.ip(),
-                host
-            ));
-        }
+
+    match resolver.resolve_and_pin(host, port) {
+        Ok(_) => Ok(parsed),
+        Err(e) if allow_proxy_dns && e.starts_with("DNS resolution failed") => Ok(parsed),
+        Err(e) => Err(e),
     }
-    if !resolved_any {
-        return Err(format!("No IP addresses resolved for {}", host));
-    }
-    Ok(parsed)
 }
 
 pub fn is_allowed_domain(candidate: &Url, target_host: &str) -> bool {
     let Some(host) = candidate.host_str() else {
         return false;
     };
-    let h = host.to_ascii_lowercase();
-    let t = target_host.to_ascii_lowercase();
-    h == t || h.ends_with(&format!(".{}", t))
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    let t = target_host.trim_end_matches('.').to_ascii_lowercase();
+    if h == t || h.ends_with(&format!(".{}", t)) {
+        return true;
+    }
+    // Allow canonical www.<apex> <-> <apex> redirection
+    if let Some(apex) = t.strip_prefix("www.") {
+        return h == apex || h.ends_with(&format!(".{}", apex));
+    }
+    false
 }
 
-fn build_http_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
+pub fn validate_proxy_url(raw_proxy: &str, allow_local_staging: bool) -> Result<String, String> {
+    let trimmed = raw_proxy.trim();
+    let parsed = Url::parse(trimmed).map_err(|e| format!("Invalid proxy URL: {}", e))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("Outbound proxy must use http:// or https:// scheme".to_string());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Proxy URL missing host".to_string())?
+        .trim_matches(&['[', ']'][..])
+        .to_ascii_lowercase();
+    if host == "metadata.google.internal" || host.ends_with(".internal") {
+        return Err("Proxy host cannot target internal cloud metadata".to_string());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_ip(ip, allow_local_staging) {
+            return Err(format!("Proxy IP {} violates SSRF policy", ip));
+        }
+    }
+    Ok(trimmed.to_string())
+}
+
+fn resolve_effective_proxy(
+    explicit_proxy: &Option<String>,
+    target_url: &Url,
+    allow_local_staging: bool,
+) -> Result<Option<String>, String> {
+    if let Some(raw) = explicit_proxy {
+        if !raw.trim().is_empty() {
+            return validate_proxy_url(raw, allow_local_staging).map(Some);
+        }
+    }
+    let target_host = target_url
+        .host_str()
+        .unwrap_or("")
+        .trim_matches(&['[', ']'][..])
+        .to_ascii_lowercase();
+    if target_host == "127.0.0.1" || target_host == "localhost" || target_host == "::1" {
+        return Ok(None);
+    }
+    let no_proxy = std::env::var("NO_PROXY")
+        .or_else(|_| std::env::var("no_proxy"))
+        .unwrap_or_default();
+    if !no_proxy.is_empty() {
+        for item in no_proxy.split(',').map(|s| s.trim().to_ascii_lowercase()) {
+            if item == "*"
+                || (!item.is_empty() && (target_host == item || target_host.ends_with(&item)))
+            {
+                return Ok(None);
+            }
+        }
+    }
+
+    let env_proxy = if target_url.scheme() == "https" {
+        std::env::var("HTTPS_PROXY")
+            .or_else(|_| std::env::var("https_proxy"))
+            .or_else(|_| std::env::var("HTTP_PROXY"))
+            .or_else(|_| std::env::var("http_proxy"))
+            .ok()
+    } else {
+        std::env::var("HTTP_PROXY")
+            .or_else(|_| std::env::var("http_proxy"))
+            .ok()
+    };
+
+    if let Some(p) = env_proxy {
+        if !p.trim().is_empty() {
+            return validate_proxy_url(&p, allow_local_staging).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+fn build_http_agent(
+    resolver: PinnedSsrfResolver,
+    proxy_url: Option<&str>,
+) -> Result<ureq::Agent, String> {
+    let mut builder = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(6))
-        .timeout_read(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(12))
         .redirects(0) // Handle redirects explicitly so every hop enforces SSRF + domain boundary
-        .build()
+        .resolver(resolver);
+
+    if let Some(raw_proxy) = proxy_url {
+        let proxy = ureq::Proxy::new(raw_proxy)
+            .map_err(|e| format!("Failed configuring outbound proxy {}: {}", raw_proxy, e))?;
+        builder = builder.proxy(proxy);
+    }
+
+    Ok(builder.build())
 }
 
 fn apply_stealth_headers(mut req: ureq::Request, engagement_id: &Option<String>) -> ureq::Request {
@@ -228,10 +453,13 @@ fn fetch_url_safe(
     target_host: &str,
     allow_local_staging: bool,
     engagement_id: &Option<String>,
+    resolver: &PinnedSsrfResolver,
+    allow_proxy_dns: bool,
 ) -> Result<FetchedResponse, String> {
     let mut current = url_str.to_string();
-    for _hop in 0..4 {
-        let parsed = verify_url_ssrf(&current, allow_local_staging)?;
+    for _hop in 0..5 {
+        let parsed =
+            verify_url_ssrf_pinned(&current, allow_local_staging, resolver, allow_proxy_dns)?;
         if !is_allowed_domain(&parsed, target_host) {
             return Err(format!(
                 "Redirect escaped target domain boundary: {}",
@@ -389,14 +617,13 @@ fn write_sandboxed_harvest(dir: &Path, filename: &str, body: &str) {
             return;
         }
     }
-    if let Ok(mut f) = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .custom_flags(libc_o_nofollow())
-        .mode(0o600)
-        .open(&target)
+    let mut opts = OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
     {
+        opts.custom_flags(libc_o_nofollow()).mode(0o600);
+    }
+    if let Ok(mut f) = opts.open(&target) {
         let _ = f.write_all(body.as_bytes());
     }
 }
@@ -466,17 +693,62 @@ fn detect_technologies(
     (techs.into_iter().collect(), vendors.into_iter().collect())
 }
 
+fn is_skippable_static_asset(url: &Url) -> bool {
+    let p = url.path().to_ascii_lowercase();
+    [
+        ".css", ".ico", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".woff",
+        ".woff2", ".ttf", ".otf", ".eot", ".mp4", ".webm", ".mp3", ".wav", ".ogg", ".pdf",
+    ]
+    .iter()
+    .any(|ext| p.ends_with(ext))
+}
+
 pub fn run_spider(
     config: &SpiderConfig,
     rules: &[CompiledDorkRule],
 ) -> Result<SpiderResult, String> {
-    let root_parsed = verify_url_ssrf(&config.target_url, config.allow_local_staging)?;
-    let target_host = root_parsed
+    let initial_url = Url::parse(&config.target_url)
+        .map_err(|e| format!("Invalid target URL {}: {}", config.target_url, e))?;
+    let effective_proxy =
+        resolve_effective_proxy(&config.proxy_url, &initial_url, config.allow_local_staging)?;
+    let allow_proxy_dns = effective_proxy.is_some();
+
+    let resolver = PinnedSsrfResolver::new(config.allow_local_staging);
+    let mut root_parsed = verify_url_ssrf_pinned(
+        &config.target_url,
+        config.allow_local_staging,
+        &resolver,
+        allow_proxy_dns,
+    )?;
+    let mut target_host = root_parsed
         .host_str()
         .ok_or_else(|| "Missing target host".to_string())?
         .to_ascii_lowercase();
+    let port = root_parsed.port_or_known_default().unwrap_or(443);
+    let pinned_ips = resolver.pinned_ips_for(&target_host, port);
+    let ip_summary = if pinned_ips.is_empty() {
+        "proxy-resolved".to_string()
+    } else {
+        pinned_ips
+            .iter()
+            .map(|ip| ip.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let egress_mode = if let Some(ref p) = effective_proxy {
+        format!("OUTBOUND PROXY {}", p)
+    } else if config.allow_local_staging {
+        "LOCAL STAGING EGRESS".to_string()
+    } else {
+        "OUTBOUND INTERNET EGRESS".to_string()
+    };
+    eprintln!(
+        "[NET] Target {} pinned to [{}] ({} // GUI LOOPBACK 127.0.0.1)",
+        config.target_url, ip_summary, egress_mode
+    );
+
     let harvest_dir = provision_harvest_dir(config.harvest_dir.as_deref())?;
-    let agent = build_http_agent();
+    let agent = build_http_agent(resolver.clone(), effective_proxy.as_deref())?;
 
     eprintln!(
         "[SPIDER] Phase 1: Baseline & WAF Profiling for {}",
@@ -490,29 +762,46 @@ pub fn run_spider(
     let mut docs: Vec<HarvestedDoc> = Vec::new();
     let mut visited: HashSet<String> = HashSet::new();
 
-    if let Ok(root_resp) = fetch_url_safe(
+    match fetch_url_safe(
         &agent,
         &config.target_url,
         &target_host,
         config.allow_local_staging,
         &config.engagement_id,
+        &resolver,
+        allow_proxy_dns,
     ) {
-        latencies.push(root_resp.latency_ms);
-        header_samples.push(root_resp.headers_joined.clone());
-        if let Some(w) = root_resp.waf_vendor {
-            detected_waf = w;
+        Ok(root_resp) => {
+            latencies.push(root_resp.latency_ms);
+            header_samples.push(root_resp.headers_joined.clone());
+            if let Some(w) = root_resp.waf_vendor {
+                detected_waf = w;
+            }
+            if let Ok(final_parsed) = Url::parse(&root_resp.final_url) {
+                if let Some(fh) = final_parsed.host_str() {
+                    let fh_low = fh.to_ascii_lowercase();
+                    if fh_low != target_host {
+                        target_host = fh_low;
+                    }
+                }
+                root_parsed = final_parsed;
+            }
+            visited.insert(root_resp.final_url.clone());
+            visited.insert(config.target_url.clone());
+            write_sandboxed_harvest(&harvest_dir, "0000_root.html", &root_resp.body);
+            docs.push(build_harvested_doc(
+                &root_resp.final_url,
+                root_resp.status,
+                &root_resp.content_type,
+                &root_resp.body,
+            ));
         }
-        visited.insert(root_resp.final_url.clone());
-        visited.insert(config.target_url.clone());
-        write_sandboxed_harvest(&harvest_dir, "0000_root.html", &root_resp.body);
-        docs.push(build_harvested_doc(
-            &root_resp.final_url,
-            root_resp.status,
-            &root_resp.content_type,
-            &root_resp.body,
-        ));
-    } else {
-        return Err(format!("Unable to connect to target {}", config.target_url));
+        Err(e) => {
+            return Err(format!(
+                "Unable to connect to target {}: {}",
+                config.target_url, e
+            ));
+        }
     }
 
     let mut baseline_404_simhash: u64 = 0;
@@ -528,11 +817,48 @@ pub fn run_spider(
                 &target_host,
                 config.allow_local_staging,
                 &config.engagement_id,
+                &resolver,
+                allow_proxy_dns,
             ) {
                 latencies.push(r404.latency_ms);
                 if baseline_404_simhash == 0 {
                     baseline_404_simhash = dom_tag_simhash(&r404.body);
                     baseline_404_entropy_bps = shannon_entropy_bps(&r404.body);
+                }
+            }
+        }
+    }
+
+    // Optional passive /robots.txt discovery (ignores 404 or HTML catch-alls cleanly)
+    let mut robots_disallowed_paths: Vec<String> = Vec::new();
+    if let Ok(robots_url) = root_parsed.join("/robots.txt") {
+        let robots_str = robots_url.to_string();
+        if visited.insert(robots_str.clone()) {
+            if let Ok(r_resp) = fetch_url_safe(
+                &agent,
+                &robots_str,
+                &target_host,
+                config.allow_local_staging,
+                &config.engagement_id,
+                &resolver,
+                allow_proxy_dns,
+            ) {
+                let ct_low = r_resp.content_type.to_ascii_lowercase();
+                let body_trim = r_resp.body.trim_start().to_ascii_lowercase();
+                if r_resp.status == 200
+                    && !ct_low.contains("text/html")
+                    && !body_trim.starts_with("<!doctype")
+                    && !body_trim.starts_with("<html")
+                {
+                    write_sandboxed_harvest(&harvest_dir, "0000_robots.txt", &r_resp.body);
+                    let r_doc = build_harvested_doc(
+                        &r_resp.final_url,
+                        r_resp.status,
+                        &r_resp.content_type,
+                        &r_resp.body,
+                    );
+                    robots_disallowed_paths = r_doc.robots_disallowed.clone();
+                    docs.push(r_doc);
                 }
             }
         }
@@ -550,7 +876,7 @@ pub fn run_spider(
     );
 
     // Phase 2: Bounded BFS Asset Spidering (Depth <= config.max_depth, capped 25 HTML / 50 JS / 50 Config)
-    let max_depth = config.max_depth.min(3);
+    let max_depth = config.max_depth.clamp(1, 3);
     let mut queue: VecDeque<(String, usize)> = VecDeque::new();
     let mut html_count = 1usize;
     let mut js_count = 0usize;
@@ -581,11 +907,15 @@ pub fn run_spider(
                     || trimmed.starts_with('#')
                     || trimmed.starts_with("javascript:")
                     || trimmed.starts_with("mailto:")
+                    || trimmed.starts_with("data:")
                 {
                     continue;
                 }
                 if let Ok(mut abs) = base.join(trimmed) {
                     abs.set_fragment(None);
+                    if is_skippable_static_asset(&abs) {
+                        continue;
+                    }
                     if is_allowed_domain(&abs, &target_host) {
                         let s = abs.to_string();
                         if visited.insert(s.clone()) {
@@ -599,7 +929,10 @@ pub fn run_spider(
         if doc.doc_kind == crate::ast_verifier::DocKind::JavaScript {
             for chunk_url in extract_bundler_chunks(&doc.raw_body, &base) {
                 if let Ok(abs) = Url::parse(&chunk_url) {
-                    if is_allowed_domain(&abs, &target_host) && visited.insert(chunk_url.clone()) {
+                    if !is_skippable_static_asset(&abs)
+                        && is_allowed_domain(&abs, &target_host)
+                        && visited.insert(chunk_url.clone())
+                    {
                         queue.push_back((chunk_url, depth + 1));
                     }
                 }
@@ -611,6 +944,46 @@ pub fn run_spider(
         enqueue_from_doc(root_doc, 0, &mut visited, &mut queue);
     }
 
+    // Optional Stage-0 SPA Hydration Seed Ingestion (P0 #2)
+    if let Some(ref seed_path) = config.spa_seed_path {
+        if let Ok(seed_raw) = fs::read_to_string(seed_path) {
+            if let Ok(seed) = serde_json::from_str::<SpaSeedPayload>(&seed_raw) {
+                let seed_url = seed
+                    .final_url
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(&config.target_url);
+                if let Some(ref html_body) = seed.hydrated_html {
+                    if !html_body.trim().is_empty() {
+                        write_sandboxed_harvest(&harvest_dir, "0000_spa_hydrated.html", html_body);
+                        let spa_doc = build_harvested_doc(
+                            seed_url,
+                            200,
+                            "text/html; charset=utf-8",
+                            html_body,
+                        );
+                        enqueue_from_doc(&spa_doc, 0, &mut visited, &mut queue);
+                        docs.push(spa_doc);
+                        html_count += 1;
+                    }
+                }
+                for xhr in seed.xhr_urls {
+                    if let Ok(mut abs) = root_parsed.join(xhr.trim()) {
+                        abs.set_fragment(None);
+                        if !is_skippable_static_asset(&abs) && is_allowed_domain(&abs, &target_host)
+                        {
+                            let s = abs.to_string();
+                            if visited.insert(s.clone()) {
+                                queue.push_back((s, 1));
+                            }
+                        }
+                    }
+                }
+                eprintln!("[SPIDER] Ingested Stage-0 SPA hydrated DOM & XHR seed routes");
+            }
+        }
+    }
+
     let crawl_start = Instant::now();
     let mut file_idx = 1usize;
     while let Some((next_url, depth)) = queue.pop_front() {
@@ -620,13 +993,21 @@ pub fn run_spider(
             );
             break;
         }
-        let lower_u = next_url.to_ascii_lowercase();
-        let looks_js = lower_u.ends_with(".js") || lower_u.ends_with(".mjs");
+        let path_only = Url::parse(&next_url)
+            .map(|u| u.path().to_ascii_lowercase())
+            .unwrap_or_else(|_| {
+                next_url
+                    .split('?')
+                    .next()
+                    .unwrap_or(&next_url)
+                    .to_ascii_lowercase()
+            });
+        let looks_js = path_only.ends_with(".js") || path_only.ends_with(".mjs");
         let looks_cfg = [
             ".json", ".yaml", ".yml", ".xml", ".conf", ".env", ".log", ".txt", ".sql",
         ]
         .iter()
-        .any(|ext| lower_u.contains(ext));
+        .any(|ext| path_only.ends_with(ext));
 
         if looks_js && js_count >= MAX_JS_FILES {
             continue;
@@ -644,6 +1025,8 @@ pub fn run_spider(
             &target_host,
             config.allow_local_staging,
             &config.engagement_id,
+            &resolver,
+            allow_proxy_dns,
         ) {
             header_samples.push(resp.headers_joined.clone());
             let doc =
@@ -678,25 +1061,57 @@ pub fn run_spider(
         html_count, js_count, config_count
     );
 
-    // Phase 3: Paced Active Dork Probing (Only if stealth_mode == false)
+    // Phase 3: Paced Active Dork Probing (when !stealth_mode OR custom wordlist supplied)
     let mut waf_tripped = false;
-    if !config.stealth_mode {
+    if !config.stealth_mode || !config.custom_wordlist.is_empty() {
         let mut candidate_paths: Vec<String> = Vec::new();
         let mut seen_paths: HashSet<String> = HashSet::new();
-        // Prioritize [CHAIN] rules first, then standard rules
-        for chain_pass in [true, false] {
-            for rule in rules.iter().filter(|r| r.is_chain == chain_pass) {
-                for p in &rule.candidate_probe_paths {
-                    if seen_paths.insert(p.clone()) {
-                        candidate_paths.push(p.clone());
+
+        for custom in &config.custom_wordlist {
+            let trimmed = custom.trim();
+            if !trimmed.is_empty() && !trimmed.contains("..") && !trimmed.contains('\\') {
+                let norm = if trimmed.starts_with('/') {
+                    trimmed.to_string()
+                } else {
+                    format!("/{}", trimmed)
+                };
+                if seen_paths.insert(norm.clone()) {
+                    candidate_paths.push(norm);
+                }
+            }
+        }
+
+        if !config.stealth_mode {
+            for rpath in &robots_disallowed_paths {
+                let clean = rpath.trim().trim_end_matches('*');
+                if clean.starts_with('/')
+                    && clean.len() > 1
+                    && !clean.contains(' ')
+                    && seen_paths.insert(clean.to_string())
+                {
+                    candidate_paths.push(clean.to_string());
+                }
+            }
+            // Prioritize [CHAIN] rules first, then standard rules
+            for chain_pass in [true, false] {
+                for rule in rules.iter().filter(|r| r.is_chain == chain_pass) {
+                    for p in &rule.candidate_probe_paths {
+                        if seen_paths.insert(p.clone()) {
+                            candidate_paths.push(p.clone());
+                        }
                     }
                 }
             }
         }
         candidate_paths.truncate(MAX_ACTIVE_PROBES);
+        let j_min = config.jitter_min_ms.min(5000);
+        let j_max = config.jitter_max_ms.clamp(j_min, 5000);
+
         eprintln!(
-            "[SPIDER] Phase 3: Active Verification enabled ({} jitter-paced probes, concurrency={})",
+            "[SPIDER] Phase 3: Active Verification enabled ({} jitter-paced probes [{}-{}ms], concurrency={})",
             candidate_paths.len(),
+            j_min,
+            j_max,
             PROBE_CONCURRENCY_LIMIT
         );
 
@@ -717,9 +1132,15 @@ pub fn run_spider(
             let thost = target_host.clone();
             let eng = config.engagement_id.clone();
             let allow_local = config.allow_local_staging;
+            let worker_resolver = resolver.clone();
+            let worker_proxy = effective_proxy.clone();
 
             handles.push(thread::spawn(move || {
-                let worker_agent = build_http_agent();
+                let Ok(worker_agent) =
+                    build_http_agent(worker_resolver.clone(), worker_proxy.as_deref())
+                else {
+                    return;
+                };
                 loop {
                     if trip.load(Ordering::Acquire) {
                         break;
@@ -732,9 +1153,17 @@ pub fn run_spider(
                         break;
                     };
 
-                    // Randomized pre-request jitter (250ms - 750ms)
-                    let jitter_ms: u64 = rand::thread_rng().gen_range(PROBE_JITTER_MIN_MS..=PROBE_JITTER_MAX_MS);
-                    thread::sleep(Duration::from_millis(jitter_ms));
+                    // Randomized pre-request jitter
+                    if j_max > 0 {
+                        let jitter_ms: u64 = if j_min == j_max {
+                            j_min
+                        } else {
+                            rand::thread_rng().gen_range(j_min..=j_max)
+                        };
+                        if jitter_ms > 0 {
+                            thread::sleep(Duration::from_millis(jitter_ms));
+                        }
+                    }
 
                     if trip.load(Ordering::Acquire) {
                         break;
@@ -750,7 +1179,15 @@ pub fn run_spider(
                         }
                     }
 
-                    if let Ok(resp) = fetch_url_safe(&worker_agent, &full_str, &thost, allow_local, &eng) {
+                    if let Ok(resp) = fetch_url_safe(
+                        &worker_agent,
+                        &full_str,
+                        &thost,
+                        allow_local,
+                        &eng,
+                        &worker_resolver,
+                        allow_proxy_dns,
+                    ) {
                         if resp.waf_blocked {
                             trip.store(true, Ordering::Release);
                             let vendor_str = resp.waf_vendor.unwrap_or_else(|| "WAF_RATE_LIMIT".to_string());

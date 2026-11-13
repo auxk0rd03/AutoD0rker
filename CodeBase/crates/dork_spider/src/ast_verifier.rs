@@ -39,6 +39,9 @@ pub struct HarvestedDoc {
     pub simhash: u64,
     pub body_entropy_bps: i64,
     pub is_vendor_asset: bool,
+    pub robots_disallowed: Vec<String>,
+    pub is_git_exposed: bool,
+    pub is_swagger_exposed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -390,6 +393,44 @@ pub fn build_harvested_doc(
 
     let config_valid = verify_config_structure(&doc_kind, raw_body);
 
+    let lower_path = path.split('?').next().unwrap_or(&path).to_ascii_lowercase();
+    let lower_body = raw_body.to_ascii_lowercase();
+    let mut robots_disallowed = Vec::new();
+    if lower_path == "/robots.txt" && status_code == 200 {
+        for line in raw_body.lines() {
+            let trimmed = line.split('#').next().unwrap_or("").trim();
+            if let Some(rest) = trimmed
+                .strip_prefix("Disallow:")
+                .or_else(|| trimmed.strip_prefix("disallow:"))
+            {
+                let rpath = rest.trim();
+                if rpath.starts_with('/') && rpath != "/" {
+                    robots_disallowed.push(rpath.to_string());
+                }
+            }
+        }
+    }
+
+    let is_git_exposed = status_code == 200
+        && ((lower_path.contains("/.git/")
+            && (lower_body.contains("[core]")
+                || lower_body.contains("[remote ")
+                || lower_body.contains("ref: refs/")))
+            || (has_dir_index_dom
+                && dir_listing_entries
+                    .iter()
+                    .any(|e| e.to_ascii_lowercase().contains(".git"))));
+
+    let is_swagger_exposed = status_code == 200
+        && !lower_body.starts_with("<!doctype html><html><head><title>404")
+        && (lower_path.contains("swagger")
+            || lower_path.contains("api-docs")
+            || lower_path.contains("openapi"))
+        && (matches!(doc_kind, DocKind::Json | DocKind::Yaml)
+            || lower_body.contains("swagger-ui")
+            || lower_body.contains("\"openapi\"")
+            || lower_body.contains("\"swagger\""));
+
     HarvestedDoc {
         url: url.to_string(),
         path,
@@ -410,6 +451,9 @@ pub fn build_harvested_doc(
         simhash,
         body_entropy_bps,
         is_vendor_asset: is_vendor_url(url),
+        robots_disallowed,
+        is_git_exposed,
+        is_swagger_exposed,
     }
 }
 
@@ -649,6 +693,7 @@ pub fn verify_rules_against_docs(
     let mut verified = Vec::new();
     let mut stats = VerificationStats::default();
     let mut dedup: HashSet<(i64, String)> = HashSet::new();
+    let mut valid_docs: Vec<&HarvestedDoc> = Vec::new();
 
     for doc in docs {
         // Gate 0: Soft-404 Differential SimHash Guard (Section 3.4A)
@@ -668,6 +713,7 @@ pub fn verify_rules_against_docs(
             stats.soft404_fp_dropped += 1;
             continue;
         }
+        valid_docs.push(doc);
 
         for rule in rules {
             if !eval_dork_expr(&rule.expr_tree, doc) {
@@ -819,5 +865,340 @@ pub fn verify_rules_against_docs(
         }
     }
 
+    correlate_chain_findings(rules, &valid_docs, &mut verified, &mut dedup);
+
     (verified, stats)
+}
+
+fn collect_and_branches<'a>(expr: &'a DorkExpr, out: &mut Vec<&'a DorkExpr>) {
+    match expr {
+        DorkExpr::And(parts) => {
+            for part in parts {
+                collect_and_branches(part, out);
+            }
+        }
+        _ => out.push(expr),
+    }
+}
+
+fn find_chain_anchor_rule<'a>(
+    rules: &'a [CompiledDorkRule],
+    preferred_terms: &[&str],
+) -> Option<&'a CompiledDorkRule> {
+    for term in preferred_terms {
+        let needle = term.to_ascii_lowercase();
+        if let Some(r) = rules.iter().find(|r| {
+            r.is_chain
+                && (r.category.to_ascii_lowercase().contains(&needle)
+                    || r.raw_dork.to_ascii_lowercase().contains(&needle))
+        }) {
+            return Some(r);
+        }
+    }
+    rules.iter().find(|r| r.is_chain).or_else(|| rules.first())
+}
+
+fn push_chain_finding(
+    verified: &mut Vec<VerifiedMatch>,
+    anchor: &CompiledDorkRule,
+    severity: &str,
+    cwe_id: &str,
+    endpoint: String,
+    ast_node_type: &str,
+    snippet: String,
+    confidence_bps: i64,
+    entropy_bps: i64,
+) {
+    let duplicate = verified.iter().any(|existing| {
+        existing.rule_id == anchor.rule_id
+            && existing.matched_endpoint == endpoint
+            && existing.ast_node_type == ast_node_type
+    });
+    if duplicate {
+        return;
+    }
+    let (cvss_vector, cvss_score_bps) = map_cvss(severity, cwe_id);
+    verified.push(VerifiedMatch {
+        rule_id: anchor.rule_id,
+        category: if anchor.category.starts_with("[CHAIN]") {
+            anchor.category.clone()
+        } else {
+            format!("[CHAIN] {}", anchor.category)
+        },
+        is_chain: true,
+        raw_dork: anchor.raw_dork.clone(),
+        severity: severity.to_string(),
+        cwe_id: cwe_id.to_string(),
+        cvss_vector: cvss_vector.to_string(),
+        cvss_score_bps,
+        matched_endpoint: endpoint,
+        ast_node_type: ast_node_type.to_string(),
+        ast_context_snippet: snippet,
+        shannon_entropy_bps: entropy_bps,
+        confidence_bps,
+        is_vendor_observation: false,
+        is_shadow_downgraded: false,
+    });
+}
+
+/// Cross-Asset & Cross-Finding [CHAIN] Correlator (P0 #1).
+/// Upgrades isolated single-document evaluation to correlate signals spanning distinct
+/// harvested assets on the same host (.git exposure, robots.txt disallow rules, Swagger/OpenAPI,
+/// login portals, directory indexes, and high-entropy secrets).
+fn correlate_chain_findings(
+    rules: &[CompiledDorkRule],
+    valid_docs: &[&HarvestedDoc],
+    verified: &mut Vec<VerifiedMatch>,
+    dedup: &mut HashSet<(i64, String)>,
+) {
+    if rules.is_empty() || valid_docs.len() < 2 {
+        return;
+    }
+
+    let first_party_docs: Vec<&&HarvestedDoc> = valid_docs
+        .iter()
+        .filter(|d| !d.is_vendor_asset && d.status_code < 400)
+        .collect();
+    if first_party_docs.len() < 2 {
+        return;
+    }
+
+    // 1. Multi-doc DorkExpr::And correlation for [CHAIN] rules that span multiple distinct URLs
+    for rule in rules.iter().filter(|r| r.is_chain) {
+        let mut branches = Vec::new();
+        collect_and_branches(&rule.expr_tree, &mut branches);
+        if branches.len() < 2 {
+            continue;
+        }
+        let mut matched_urls: Vec<String> = Vec::new();
+        let mut all_satisfied = true;
+        for branch in &branches {
+            let mut found_url: Option<String> = None;
+            for doc in &first_party_docs {
+                if eval_dork_expr(branch, doc) {
+                    if rule_requires_dir_index(rule)
+                        && !doc.has_dir_index_dom
+                        && doc.doc_kind == DocKind::Html
+                    {
+                        continue;
+                    }
+                    if rule_is_login_portal(rule)
+                        && !doc.has_login_dom
+                        && doc.doc_kind == DocKind::Html
+                    {
+                        continue;
+                    }
+                    if !matched_urls.contains(&doc.url) {
+                        found_url = Some(doc.url.clone());
+                        break;
+                    }
+                    if found_url.is_none() {
+                        found_url = Some(doc.url.clone());
+                    }
+                }
+            }
+            if let Some(u) = found_url {
+                if !matched_urls.contains(&u) {
+                    matched_urls.push(u);
+                }
+            } else {
+                all_satisfied = false;
+                break;
+            }
+        }
+        if all_satisfied && matched_urls.len() >= 2 {
+            let primary = matched_urls[0].clone();
+            if dedup.insert((rule.rule_id, format!("CHAIN::{}", primary))) {
+                let snippet = format!(
+                    "Multi-asset [CHAIN] rule correlated across {} endpoints: {}",
+                    matched_urls.len(),
+                    matched_urls
+                        .iter()
+                        .take(4)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" + ")
+                );
+                let sev = if rule.default_severity == "INFO" || rule.default_severity == "LOW" {
+                    "MEDIUM"
+                } else {
+                    &rule.default_severity
+                };
+                push_chain_finding(
+                    verified,
+                    rule,
+                    sev,
+                    &rule.cwe_id,
+                    primary,
+                    "CHAIN_MULTI_ASSET_RULE",
+                    snippet,
+                    9300,
+                    0,
+                );
+            }
+        }
+    }
+
+    // 2. Semantic Attack-Chain Correlation (.git + robots.txt + Swagger/Login + Secrets)
+    let git_doc = first_party_docs.iter().find(|d| d.is_git_exposed);
+    let swagger_doc = first_party_docs.iter().find(|d| d.is_swagger_exposed);
+    let login_doc = first_party_docs.iter().find(|d| d.has_login_dom);
+    let dir_doc = first_party_docs.iter().find(|d| d.has_dir_index_dom);
+    let robots_paths: Vec<String> = first_party_docs
+        .iter()
+        .flat_map(|d| d.robots_disallowed.iter().cloned())
+        .collect();
+    let high_secret_finding: Option<(String, i64)> = verified
+        .iter()
+        .find(|v| {
+            !v.is_vendor_observation
+                && !v.is_shadow_downgraded
+                && (v.severity == "CRITICAL" || v.severity == "HIGH")
+                && v.shannon_entropy_bps >= 320
+        })
+        .map(|v| (v.matched_endpoint.clone(), v.shannon_entropy_bps));
+
+    if let Some(gdoc) = git_doc {
+        let mut pivots = Vec::new();
+        if !robots_paths.is_empty() {
+            pivots.push(format!(
+                "robots_disallow=[{}]",
+                robots_paths
+                    .iter()
+                    .take(4)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if let Some(sdoc) = swagger_doc {
+            pivots.push(format!("openapi={}", sdoc.path));
+        }
+        if let Some(ldoc) = login_doc {
+            pivots.push(format!("login={}", ldoc.path));
+        }
+        if let Some(ddoc) = dir_doc {
+            pivots.push(format!("dir_index={}", ddoc.path));
+        }
+        if let Some((ref sf_ep, _)) = high_secret_finding {
+            pivots.push(format!("secret={}", sf_ep));
+        }
+        if !pivots.is_empty() {
+            if let Some(anchor) = find_chain_anchor_rule(rules, &[".git", "juicy", "passwords"]) {
+                let snippet = format!(
+                    "Composite VCS recon chain: exposed_git={} correlated with {}",
+                    gdoc.url,
+                    pivots.join(" + ")
+                );
+                push_chain_finding(
+                    verified,
+                    anchor,
+                    "CRITICAL",
+                    "CWE-538",
+                    gdoc.url.clone(),
+                    "CHAIN_GIT_RECON_PIVOT",
+                    snippet,
+                    9700,
+                    gdoc.body_entropy_bps,
+                );
+            }
+        }
+    }
+
+    if !robots_paths.is_empty() {
+        let accessible_disallowed = first_party_docs.iter().find(|d| {
+            !d.path.eq_ignore_ascii_case("/robots.txt")
+                && robots_paths.iter().any(|p| {
+                    p.len() > 1
+                        && d.path
+                            .to_ascii_lowercase()
+                            .starts_with(&p.to_ascii_lowercase())
+                })
+        });
+        if accessible_disallowed.is_some()
+            || swagger_doc.is_some()
+            || (login_doc.is_some() && dir_doc.is_some())
+        {
+            if let Some(anchor) = find_chain_anchor_rule(rules, &["robots", "login", "juicy"]) {
+                let primary_url = accessible_disallowed
+                    .map(|d| d.url.clone())
+                    .or_else(|| swagger_doc.map(|d| d.url.clone()))
+                    .or_else(|| login_doc.map(|d| d.url.clone()))
+                    .unwrap_or_else(|| first_party_docs[0].url.clone());
+                let mut evidence = vec![format!(
+                    "robots_disallow=[{}]",
+                    robots_paths
+                        .iter()
+                        .take(5)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )];
+                if let Some(ad) = accessible_disallowed {
+                    evidence.push(format!(
+                        "live_disallowed_route={} (HTTP {})",
+                        ad.path, ad.status_code
+                    ));
+                }
+                if let Some(sd) = swagger_doc {
+                    evidence.push(format!("openapi_schema={}", sd.path));
+                }
+                if let Some(ld) = login_doc {
+                    evidence.push(format!("login_dom={}", ld.path));
+                }
+                if let Some(dd) = dir_doc {
+                    evidence.push(format!("dir_index={}", ddoc_path(dd)));
+                }
+                let sev = if accessible_disallowed.is_some() || swagger_doc.is_some() {
+                    "HIGH"
+                } else {
+                    "MEDIUM"
+                };
+                push_chain_finding(
+                    verified,
+                    anchor,
+                    sev,
+                    "CWE-200",
+                    primary_url,
+                    "CHAIN_ROBOTS_SURFACE_PIVOT",
+                    format!("Cross-asset surface chain: {}", evidence.join(" + ")),
+                    9200,
+                    0,
+                );
+            }
+        }
+    }
+
+    if let (Some(ddoc), Some((sf_ep, sf_entropy))) = (dir_doc.or(swagger_doc), high_secret_finding)
+    {
+        if ddoc.url != sf_ep {
+            if let Some(anchor) = find_chain_anchor_rule(rules, &["passwords", "juicy"]) {
+                let snippet = format!(
+                    "Cross-asset credential chain: {} ({}) paired with verified secret at {}",
+                    if ddoc.has_dir_index_dom {
+                        "directory_index"
+                    } else {
+                        "openapi_surface"
+                    },
+                    ddoc.url,
+                    sf_ep
+                );
+                push_chain_finding(
+                    verified,
+                    anchor,
+                    "CRITICAL",
+                    "CWE-538",
+                    ddoc.url.clone(),
+                    "CHAIN_SURFACE_SECRET_PIVOT",
+                    snippet,
+                    9600,
+                    sf_entropy,
+                );
+            }
+        }
+    }
+}
+
+fn ddoc_path(doc: &HarvestedDoc) -> &str {
+    &doc.path
 }

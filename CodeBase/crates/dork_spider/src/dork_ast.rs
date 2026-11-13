@@ -539,6 +539,8 @@ fn push_probe(path: String, seen: &mut HashSet<String>, out: &mut Vec<String>) {
         || trimmed.contains(' ')
         || trimmed.contains('?')
         || trimmed.contains(':')
+        || trimmed.contains('\\')
+        || trimmed.chars().any(char::is_control)
         || trimmed.len() > 96
     {
         return;

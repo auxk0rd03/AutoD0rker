@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/auxk0rd03/AutoD0rker/gateway/secguard"
+	"github.com/auxk0rd03/AutoD0rker/gateway/cmd/gateway/secguard"
 )
 
 func VerifyParseTargetInputMultiAndCSV(t *testing.T) {

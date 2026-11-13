@@ -4,7 +4,7 @@ set -eu
 
 DB_PATH="${1:-${AUTODORKER_DB_PATH:-data/autodorker_state.db}}"
 if [ ! -f "$DB_PATH" ]; then
-    printf '<span class="val-neg">[DB: OFFLINE]</span> <span class="val-pos">[LOOPBACK: 127.0.0.1]</span>\n'
+    printf '<span class="val-neg">[DB: OFFLINE]</span> <span class="val-pos">[GUI: 127.0.0.1]</span> <span class="val-pos">[EGRESS: INTERNET]</span>\n'
     exit 0
 fi
 
@@ -32,5 +32,5 @@ fi
 DB_SIZE_KB=$(du -k "$DB_PATH" | awk '{print $1}')
 SYNC_TIME=$(date -u +"%H:%M:%S UTC")
 
-printf '<span class="val-pos">[DB: %s_OK // %s KB]</span> <span class="val-pos">[DORKS: %s_ACTIVE // %s_CHAIN]</span> <span class="val-muted">[SYNC: %s]</span> <span class="val-pos">[LOOPBACK: 127.0.0.1]</span>\n' \
+printf '<span class="val-pos">[DB: %s_OK // %s KB]</span> <span class="val-pos">[DORKS: %s_ACTIVE // %s_CHAIN]</span> <span class="val-muted">[SYNC: %s]</span> <span class="val-pos">[GUI: 127.0.0.1]</span> <span class="val-pos">[EGRESS: INTERNET]</span>\n' \
     "$WAL_MODE" "$DB_SIZE_KB" "$DORK_COUNT" "$CHAIN_COUNT" "$SYNC_TIME"

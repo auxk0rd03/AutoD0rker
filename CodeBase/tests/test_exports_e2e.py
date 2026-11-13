@@ -14,8 +14,10 @@ import http.server
 import io
 import json
 import os
+import re
 import socket
 import subprocess
+import tarfile
 import tempfile
 import threading
 import unittest
@@ -37,7 +39,10 @@ from py_engine.ast_analyzer import (
 )
 from py_engine.report_docx import write_docx_report
 from py_engine.report_md import write_markdown_report
+from py_engine.report_structured import write_jsonl_report, write_sarif_report
+from py_engine.spa_hydrator import write_spa_seed
 from py_engine.svg_telemetry import render_svg_telemetry
+from py_engine.sys_ops import create_signed_backup, emit_telemetry_status
 
 CODEBASE_DIR = Path(__file__).resolve().parent.parent
 DORKSET_CSV = CODEBASE_DIR.parent / "Docs" / "DorkSet.csv"
@@ -281,6 +286,26 @@ class TestAutoDorkerPythonAndE2E(unittest.TestCase):
             targ1 = out_dir / "Targ001"
             md_file = write_markdown_report(str(db_path), scan_id, str(targ1 / f"autodorker_triage_scan_{scan_id}.md"))
             docx_file = write_docx_report(str(db_path), scan_id, str(targ1 / f"AutoDorker_Enterprise_Report_{scan_id}.docx"))
+            sarif_file = write_sarif_report(str(db_path), scan_id, str(targ1 / f"autodorker_scan_{scan_id}.sarif"))
+            jsonl_file = write_jsonl_report(str(db_path), scan_id, str(targ1 / f"autodorker_scan_{scan_id}.jsonl"))
+
+            sarif_data = json.loads(sarif_file.read_text(encoding="utf-8"))
+            self.assertEqual(sarif_data["version"], "2.1.0")
+            self.assertGreaterEqual(len(sarif_data["runs"][0]["results"]), 1)
+
+            jsonl_lines = [json.loads(line) for line in jsonl_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(jsonl_lines[0]["record_type"], "scan_session")
+            self.assertTrue(any(rec["record_type"] == "finding" for rec in jsonl_lines))
+
+            t_code, t_html = emit_telemetry_status(str(db_path))
+            self.assertEqual(t_code, 0)
+            self.assertIn("EGRESS: INTERNET", t_html)
+            b_code, b_html = create_signed_backup(str(db_path), str(tmp / "py_backups"))
+            self.assertEqual(b_code, 0)
+            self.assertIn("SHA256:", b_html)
+
+            spa_payload = write_spa_seed(target_url, str(tmp / "spa_seed.json"))
+            self.assertIn("hydrator_engine", spa_payload)
 
             md_text = md_file.read_text(encoding="utf-8")
             self.assertIn("1. Document Control & Engagement Metadata", md_text)
@@ -339,7 +364,7 @@ class TestAutoDorkerPythonAndE2E(unittest.TestCase):
                     self.assertEqual(resp.status, 200)
                     self.assertIn("url1,url2,url3", resp.read().decode("utf-8"))
 
-                # SSRF blocking test (169.254.169.254 even with local_staging=on)
+                # SSRF blocking test on target & proxy (169.254.169.254 even with local_staging=on)
                 ssrf_req = urllib.request.Request(
                     base_gw + "/api/scan",
                     data=urllib.parse.urlencode({"target_urls": "http://169.254.169.254/latest", "local_staging": "on"}).encode(),
@@ -350,12 +375,31 @@ class TestAutoDorkerPythonAndE2E(unittest.TestCase):
                 self.assertEqual(ctx_err.exception.code, 400)
                 ctx_err.exception.close()
 
+                proxy_ssrf_req = urllib.request.Request(
+                    base_gw + "/api/scan",
+                    data=urllib.parse.urlencode({
+                        "target_urls": f"http://127.0.0.1:{self.target_port}/",
+                        "local_staging": "on",
+                        "proxy_url": "http://169.254.169.254:80",
+                    }).encode(),
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as p_err:
+                    urllib.request.urlopen(proxy_ssrf_req, timeout=5)
+                self.assertEqual(p_err.exception.code, 400)
+                p_err.exception.close()
+
                 # Live multi-URL POST /api/scan pipeline (Go -> Rust -> Python AST -> Export -> Backup)
                 multi_payload = urllib.parse.urlencode({
                     "target_urls": f"http://127.0.0.1:{self.target_port}/, http://127.0.0.1:{self.target_port}/configs/",
                     "stealth_present": "1",
                     "stealth_mode": "on",
                     "local_staging": "on",
+                    "max_depth": "2",
+                    "jitter_min_ms": "10",
+                    "jitter_max_ms": "25",
+                    "workers": "2",
+                    "custom_wordlist": "/configs/, /app.js",
                     "engagement_id": "CN-AUDIT-2026-E2E",
                 }).encode()
                 scan_req = urllib.request.Request(base_gw + "/api/scan", data=multi_payload, method="POST")
@@ -363,11 +407,17 @@ class TestAutoDorkerPythonAndE2E(unittest.TestCase):
                     self.assertEqual(resp.status, 200)
                     hx_trig = resp.headers.get("HX-Trigger", "")
                     self.assertEqual(hx_trig, "scanStarted")
-                    self.assertIn("PIPELINE RUNNING", resp.read().decode("utf-8"))
+                    banner_body = resp.read().decode("utf-8")
+                    self.assertIn("PIPELINE RUNNING", banner_body)
+                    m_batch = re.search(r'data-active-batch="([^"]+)"', banner_body)
+                    self.assertIsNotNone(m_batch)
+                    active_batch_id = m_batch.group(1)
 
-                # Poll /panels/findings until both Targ001 and Targ002 artifacts exist
-                for _ in range(60):
-                    if (out_dir / "Targ002").is_dir() and any((out_dir / "Targ002").glob("*.docx")):
+                # Poll until BOTH Targ001 and Targ002 concurrent workers finish full exports (.jsonl last)
+                for _ in range(90):
+                    t1_done = (out_dir / "Targ001").is_dir() and any((out_dir / "Targ001").glob("*.jsonl"))
+                    t2_done = (out_dir / "Targ002").is_dir() and any((out_dir / "Targ002").glob("*.jsonl"))
+                    if t1_done and t2_done:
                         break
                     threading.Event().wait(0.2)
 
@@ -380,23 +430,27 @@ class TestAutoDorkerPythonAndE2E(unittest.TestCase):
                     htmx_frag = resp.read().decode("utf-8")
                     self.assertIn('hx-swap-oob="innerHTML"', htmx_frag)
                     self.assertIn("kpi-verified-tp", htmx_frag)
+                    self.assertIn("/api/export/sarif/", htmx_frag)
+                    self.assertIn("/api/export/jsonl/", htmx_frag)
 
                 with urllib.request.urlopen(base_gw + "/panels/svg-telemetry", timeout=5) as resp:
                     self.assertEqual(resp.status, 200)
                     self.assertIn("<svg", resp.read().decode("utf-8"))
 
-                # Verify Batch ZIP now contains both Targ001 and Targ002
-                with urllib.request.urlopen(base_gw + "/api/export/batch-zip", timeout=5) as resp:
+                # Verify Batch ZIP now contains .md, .docx, .sarif, and .jsonl across both Targ001 and Targ002
+                with urllib.request.urlopen(f"{base_gw}/api/export/batch-zip?batch_id={active_batch_id}", timeout=5) as resp:
                     self.assertEqual(resp.status, 200)
                     zdata = resp.read()
                     with zipfile.ZipFile(io.BytesIO(zdata), "r") as zf:
                         names = zf.namelist()
-                        self.assertTrue(any(n.startswith("Targ001/") and n.endswith(".md") for n in names))
-                        self.assertTrue(any(n.startswith("Targ001/") and n.endswith(".docx") for n in names))
-                        self.assertTrue(any(n.startswith("Targ002/") and n.endswith(".md") for n in names))
-                        self.assertTrue(any(n.startswith("Targ002/") and n.endswith(".docx") for n in names))
+                        for targ_prefix in ("Targ001/", "Targ002/"):
+                            for suffix in (".md", ".docx", ".sarif", ".jsonl"):
+                                self.assertTrue(
+                                    any(n.startswith(targ_prefix) and n.endswith(suffix) for n in names),
+                                    f"Missing {targ_prefix}*{suffix} in ZIP ({names})",
+                                )
 
-                # Export .MD and .DOCX for latest scan
+                # Export .MD, .DOCX, .SARIF, and .JSONL for latest scan
                 with urllib.request.urlopen(f"{base_gw}/api/export/md/latest", timeout=5) as resp:
                     self.assertEqual(resp.status, 200)
                     self.assertIn("CN-AUDIT-2026-E2E", resp.read().decode("utf-8"))
@@ -404,6 +458,44 @@ class TestAutoDorkerPythonAndE2E(unittest.TestCase):
                 with urllib.request.urlopen(f"{base_gw}/api/export/docx/latest", timeout=5) as resp:
                     self.assertEqual(resp.status, 200)
                     self.assertGreater(len(resp.read()), 2000)
+
+                with urllib.request.urlopen(f"{base_gw}/api/export/sarif/latest", timeout=5) as resp:
+                    self.assertEqual(resp.status, 200)
+                    sarif_http = json.loads(resp.read().decode("utf-8"))
+                    self.assertEqual(sarif_http["version"], "2.1.0")
+
+                with urllib.request.urlopen(f"{base_gw}/api/export/jsonl/latest", timeout=5) as resp:
+                    self.assertEqual(resp.status, 200)
+                    jsonl_http = resp.read().decode("utf-8").splitlines()
+                    self.assertGreaterEqual(len(jsonl_http), 2)
+
+                # History, Compare, Dork Categories, and Cancel API routes
+                with urllib.request.urlopen(f"{base_gw}/api/dork-categories", timeout=5) as resp:
+                    self.assertEqual(resp.status, 200)
+                    cats_json = json.loads(resp.read().decode("utf-8"))
+                    self.assertGreaterEqual(len(cats_json["categories"]), 10)
+
+                with urllib.request.urlopen(f"{base_gw}/api/scans", timeout=5) as resp:
+                    self.assertEqual(resp.status, 200)
+                    hist_json = json.loads(resp.read().decode("utf-8"))
+                    self.assertGreaterEqual(len(hist_json["scans"]), 2)
+                    sid_a = hist_json["scans"][1]["scan_id"]
+                    sid_b = hist_json["scans"][0]["scan_id"]
+
+                with urllib.request.urlopen(f"{base_gw}/api/scans/compare?a={sid_a}&b={sid_b}", timeout=5) as resp:
+                    self.assertEqual(resp.status, 200)
+                    cmp_json = json.loads(resp.read().decode("utf-8"))
+                    self.assertIn("risk_delta", cmp_json)
+                    self.assertIn("added_count", cmp_json)
+
+                cancel_req = urllib.request.Request(
+                    f"{base_gw}/api/scan/ADK-NONEXISTENT/cancel",
+                    data=b"",
+                    method="POST",
+                )
+                with urllib.request.urlopen(cancel_req, timeout=5) as resp:
+                    self.assertEqual(resp.status, 200)
+                    self.assertEqual(json.loads(resp.read().decode("utf-8"))["cancelled"], False)
             finally:
                 gw_proc.terminate()
                 gw_proc.wait(timeout=5)
@@ -411,6 +503,55 @@ class TestAutoDorkerPythonAndE2E(unittest.TestCase):
                     gw_proc.stdout.close()
                 if gw_proc.stderr:
                     gw_proc.stderr.close()
+
+            # Verify P2 #10 standalone tar.gz packager & --embedded-ui flag
+            rel_tar = tmp / "autodorker-release-test.tar.gz"
+            pkg_proc = subprocess.run(
+                [str(BIN_GATEWAY), "--package-release", str(rel_tar)],
+                cwd=str(CODEBASE_DIR),
+                env=gw_env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(pkg_proc.returncode, 0, msg=pkg_proc.stderr)
+            self.assertTrue(rel_tar.is_file())
+            with tarfile.open(rel_tar, "r:gz") as tf:
+                members = set(tf.getnames())
+                self.assertIn("autodorker-release/README_RELEASE.txt", members)
+                self.assertIn("autodorker-release/web/templates/index.html", members)
+                self.assertIn("autodorker-release/bin/dork_spider", members)
+
+            # Verify --embedded-ui boots & serves index.html cleanly even from an empty working directory
+            emb_port = _free_loopback_port()
+            emb_env = {**gw_env, "AUTODORKER_BIND_ADDR": f"127.0.0.1:{emb_port}"}
+            emb_proc = subprocess.Popen(
+                [str(BIN_GATEWAY), "--embedded-ui"],
+                cwd=str(tmp),
+                env=emb_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                for _ in range(30):
+                    try:
+                        with urllib.request.urlopen(f"http://127.0.0.1:{emb_port}/", timeout=2) as resp:
+                            self.assertEqual(resp.status, 200)
+                            self.assertIn("SYS.01 // AUTODORKER", resp.read().decode("utf-8"))
+                            break
+                    except Exception:
+                        threading.Event().wait(0.1)
+                else:
+                    self.fail("Embedded UI gateway did not become ready")
+            finally:
+                emb_proc.terminate()
+                emb_proc.wait(timeout=5)
+                if emb_proc.stdout:
+                    emb_proc.stdout.close()
+                if emb_proc.stderr:
+                    emb_proc.stderr.close()
 
 
 if __name__ == "__main__":

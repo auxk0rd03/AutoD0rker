@@ -3,13 +3,19 @@ use dork_spider::ast_verifier::{
 };
 use dork_spider::db::{ingest_dork_catalog, load_catalog_rules, open_wal_db};
 use dork_spider::dork_ast::{
-    DorkExpr, DorkOperator, load_dorkset_csv, parse_dork_string, synthesize_probe_paths,
+    CompiledDorkRule, DorkExpr, DorkOperator, load_dorkset_csv, parse_dork_string,
+    synthesize_probe_paths,
 };
 use dork_spider::entropy::{
     dom_tag_simhash, evaluate_secret_candidates, shannon_entropy, shannon_entropy_bps,
     simhash_similarity_bps,
 };
+use dork_spider::spider::{
+    PinnedSsrfResolver, is_allowed_domain, is_blocked_ip, validate_proxy_url,
+};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use url::Url;
 
 fn dorkset_csv_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../Docs/DorkSet.csv")
@@ -263,4 +269,249 @@ fn test_sqlite_wal_ingest_roundtrip() {
     let _ = std::fs::remove_file(&tmp_db);
     let _ = std::fs::remove_file(format!("{}-wal", tmp_str));
     let _ = std::fs::remove_file(format!("{}-shm", tmp_str));
+}
+
+#[test]
+fn test_cross_asset_chain_correlation() {
+    let multi_asset_rule = CompiledDorkRule {
+        rule_id: 1,
+        category: "[CHAIN] Files Containing Juicy Info".to_string(),
+        is_chain: true,
+        raw_dork: r#"inurl:".git" intext:"openapi""#.to_string(),
+        notes: "Cross-asset chain rule".to_string(),
+        default_severity: "HIGH".to_string(),
+        cwe_id: "CWE-538".to_string(),
+        expr_tree: parse_dork_string(r#"inurl:".git" intext:"openapi""#),
+        candidate_probe_paths: vec!["/.git/config".to_string(), "/swagger.json".to_string()],
+    };
+    let rules = vec![multi_asset_rule];
+
+    let git_doc = build_harvested_doc(
+        "https://chain.example/.git/config",
+        200,
+        "text/plain",
+        "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+    );
+    let robots_doc = build_harvested_doc(
+        "https://chain.example/robots.txt",
+        200,
+        "text/plain",
+        "User-agent: *\nDisallow: /admin\nDisallow: /internal-api\n",
+    );
+    let swagger_doc = build_harvested_doc(
+        "https://chain.example/swagger.json",
+        200,
+        "application/json",
+        r#"{"openapi":"3.0.1","info":{"title":"Corp Internal API"}}"#,
+    );
+    let admin_login_doc = build_harvested_doc(
+        "https://chain.example/admin",
+        200,
+        "text/html",
+        "<html><head><title>Corp Admin Portal</title></head><body><form method=\"post\" action=\"/admin/login\"><input type=\"text\" name=\"u\"><input type=\"password\" name=\"p\"></form></body></html>",
+    );
+
+    let docs = vec![git_doc, robots_doc, swagger_doc, admin_login_doc];
+    let (verified, _stats) =
+        verify_rules_against_docs(&rules, &docs, "https://chain.example/", 0, false);
+
+    assert!(
+        verified
+            .iter()
+            .any(|v| v.ast_node_type == "CHAIN_GIT_RECON_PIVOT" && v.severity == "CRITICAL"),
+        "Expected CRITICAL composite .git + robots/swagger/login chain finding; got {:?}",
+        verified
+    );
+    assert!(
+        verified
+            .iter()
+            .any(|v| v.ast_node_type == "CHAIN_ROBOTS_SURFACE_PIVOT" && v.severity == "HIGH"),
+        "Expected HIGH robots.txt + accessible disallowed route / swagger chain finding"
+    );
+    assert!(
+        verified
+            .iter()
+            .any(|v| v.ast_node_type == "CHAIN_MULTI_ASSET_RULE"),
+        "Expected cross-asset DorkExpr::And [CHAIN] match spanning .git/config and swagger.json"
+    );
+}
+
+#[test]
+fn test_pinned_ssrf_resolver_and_redirect_policy() {
+    let blocked_ips = [
+        "127.0.0.1",
+        "10.0.0.5",
+        "172.16.4.20",
+        "192.168.1.99",
+        "100.64.0.1",
+        "169.254.169.254",
+        "::1",
+        "::ffff:127.0.0.1",
+        "::ffff:169.254.169.254",
+        "fe80::1",
+        "fc00::1",
+    ];
+    for raw in blocked_ips {
+        let ip: IpAddr = raw.parse().unwrap();
+        assert!(
+            is_blocked_ip(ip, false),
+            "IP {} must be blocked in strict mode",
+            raw
+        );
+    }
+
+    // Even in allow_local_staging=true, cloud metadata must stay blocked
+    let metadata_ip: IpAddr = "169.254.169.254".parse().unwrap();
+    assert!(is_blocked_ip(metadata_ip, true));
+    let mapped_meta: IpAddr = "::ffff:169.254.169.254".parse().unwrap();
+    assert!(is_blocked_ip(mapped_meta, true));
+
+    // Public IP passes SSRF check and is pinned deterministically
+    let public_ip: IpAddr = "93.184.216.34".parse().unwrap();
+    assert!(!is_blocked_ip(public_ip, false));
+
+    let resolver = PinnedSsrfResolver::new(false);
+    assert!(resolver.resolve_and_pin("127.0.0.1", 80).is_err());
+    assert!(
+        resolver
+            .resolve_and_pin("metadata.google.internal", 80)
+            .is_err()
+    );
+    let pinned = resolver
+        .resolve_and_pin("93.184.216.34", 443)
+        .expect("Public IP literal should pin");
+    assert_eq!(pinned[0].ip(), public_ip);
+    assert_eq!(
+        resolver.pinned_ips_for("93.184.216.34", 443),
+        vec![public_ip]
+    );
+
+    // Proxy validation blocks loopback/metadata proxies in strict mode
+    assert!(validate_proxy_url("http://127.0.0.1:8080", false).is_err());
+    assert!(validate_proxy_url("http://169.254.169.254:80", true).is_err());
+    assert!(validate_proxy_url("ftp://93.184.216.34:21", false).is_err());
+    assert!(validate_proxy_url("http://93.184.216.34:3128", false).is_ok());
+
+    // Canonical www.<apex> <-> <apex> redirect allowance + subdomain scope
+    let apex_url = Url::parse("https://example.com/robots.txt").unwrap();
+    let sub_url = Url::parse("https://api.example.com/v1").unwrap();
+    let rogue_url = Url::parse("https://notexample.com/").unwrap();
+    assert!(is_allowed_domain(&apex_url, "www.example.com"));
+    assert!(is_allowed_domain(&sub_url, "example.com"));
+    assert!(!is_allowed_domain(&rogue_url, "example.com"));
+}
+
+#[test]
+fn test_property_fuzz_dork_ast_and_verifier() {
+    struct Xorshift64(u64);
+    impl Xorshift64 {
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn next_usize(&mut self, bound: usize) -> usize {
+            (self.next_u64() % bound as u64) as usize
+        }
+    }
+
+    let tokens = [
+        "inurl:",
+        "intitle:",
+        "intext:",
+        "filetype:",
+        "ext:",
+        "site:",
+        "allinurl:",
+        "allintext:",
+        "(",
+        ")",
+        "|",
+        "&",
+        "OR",
+        "AND",
+        "-",
+        "+",
+        "\"",
+        "'",
+        ",",
+        " ",
+        "../",
+        "*.*",
+        ".env",
+        "admin",
+        "aws_secret_access_key",
+        "\"unterminated",
+        "'mismatch\"",
+        "<script>",
+        "\r\n",
+        "\0",
+        "über",
+    ];
+
+    let mut rng = Xorshift64(0xDEAD_BEEF_CAFE_BABEu64);
+    for case_idx in 0..5500usize {
+        let len = 1 + rng.next_usize(18);
+        let mut expr_str = String::new();
+        for _ in 0..len {
+            expr_str.push_str(tokens[rng.next_usize(tokens.len())]);
+            if rng.next_usize(3) == 0 {
+                expr_str.push(' ');
+            }
+        }
+        let parsed = parse_dork_string(&expr_str);
+        let json = serde_json::to_string(&parsed).expect("Fuzzed AST must serialize");
+        let _roundtrip: DorkExpr =
+            serde_json::from_str(&json).expect("Fuzzed AST must deserialize");
+
+        let probes = synthesize_probe_paths(&parsed);
+        for p in probes {
+            assert!(
+                p.starts_with('/') && !p.contains('\r') && !p.contains('\n') && !p.contains('\0'),
+                "Unsafe synthesized probe path at iter {}: {:?}",
+                case_idx,
+                p
+            );
+        }
+
+        if case_idx < 300 {
+            let body = format!(
+                "{{\"k\":\"{}\"}} <!-- {} --> <form><input type='password'></form> \x00 {}",
+                expr_str.replace('"', ""),
+                expr_str,
+                &expr_str
+            );
+            let doc = build_harvested_doc(
+                "https://fuzz.example/config.yaml?v=1",
+                if case_idx % 5 == 0 { 404 } else { 200 },
+                if case_idx % 2 == 0 {
+                    "text/yaml"
+                } else {
+                    "text/html"
+                },
+                &body,
+            );
+            let rule = CompiledDorkRule {
+                rule_id: (case_idx as i64) + 1,
+                category: "Fuzz".to_string(),
+                is_chain: case_idx % 3 == 0,
+                raw_dork: expr_str.clone(),
+                notes: String::new(),
+                default_severity: "MEDIUM".to_string(),
+                cwe_id: "CWE-200".to_string(),
+                expr_tree: parsed,
+                candidate_probe_paths: vec![],
+            };
+            let _ = verify_rules_against_docs(
+                &[rule],
+                &[doc],
+                "https://fuzz.example/",
+                rng.next_u64(),
+                case_idx % 2 == 0,
+            );
+        }
+    }
 }

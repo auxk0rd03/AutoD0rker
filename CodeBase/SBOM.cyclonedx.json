@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:aa81a31a-ed6d-4b40-89a0-4d62a45e60b3",
+  "serialNumber": "urn:uuid:1399b56e-8c28-4dae-a330-0ae85112025b",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-13T01:47:31Z",
+    "timestamp": "2026-11-13T04:31:01Z",
     "component": {
       "type": "application",
       "name": "AutoDorker",
@@ -159,7 +159,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a0b817f3800d8acc0a697ab124c0f52ea47f8bdbb5d9300bf0cffc84ecf64aca"
+          "content": "2981d1eb275ed4483838c0a2125511fb984cfdc8f7924bc26d51408194c33a31"
         }
       ]
     },
@@ -171,7 +171,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "db4d3dd842e93420799584e4b5fc3547a6f40594877b44ab3dfe7f8382a9a220"
+          "content": "26b46bca508a7aefa14352276fe116a52036475f804fb92f4ac0d244b025f443"
         }
       ]
     },

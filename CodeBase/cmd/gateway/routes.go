@@ -10,6 +10,7 @@ import (
 	"html"
 	"html/template"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -63,7 +64,7 @@ func (h *SSEHub) BroadcastLog(line string) {
 		cls = "val-warn"
 	} else if strings.Contains(line, "[ERR") {
 		cls = "val-neg"
-	} else if strings.Contains(line, "[SPIDER]") || strings.Contains(line, "[AST") || strings.Contains(line, "[PY-AST]") {
+	} else if strings.Contains(line, "[SPIDER]") || strings.Contains(line, "[AST") || strings.Contains(line, "[PY-AST]") || strings.Contains(line, "[NET]") || strings.Contains(line, "[SPA]") {
 		cls = "val-primary"
 	}
 	htmlLine := fmt.Sprintf(`<div class="sse-line"><span class="val-muted">&gt; [%s]</span> <span class="%s">%s</span></div>`, ts, cls, html.EscapeString(line))
@@ -123,9 +124,12 @@ func fetchDashboardState(paths AppPaths) dashboardState {
 	return state
 }
 
-func registerRoutes(mux *http.ServeMux, paths AppPaths, hub *SSEHub) {
-	staticDir := filepath.Join(paths.WebDir, "static")
-	fileSrv := http.FileServer(http.Dir(staticDir))
+func registerRoutes(mux *http.ServeMux, paths AppPaths, hub *SSEHub, batchMgr *BatchManager, webFS fs.FS) {
+	staticFS, err := fs.Sub(webFS, "static")
+	if err != nil {
+		staticFS = os.DirFS(filepath.Join(paths.WebDir, "static"))
+	}
+	fileSrv := http.FileServer(http.FS(staticFS))
 	mux.Handle("/static/", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/") {
 			http.NotFound(w, r)
@@ -139,15 +143,31 @@ func registerRoutes(mux *http.ServeMux, paths AppPaths, hub *SSEHub) {
 			http.NotFound(w, r)
 			return
 		}
-		handleIndex(w, r, paths)
+		handleIndex(w, r, paths, webFS)
 	})
 
 	mux.HandleFunc("/ui/input-mode", func(w http.ResponseWriter, r *http.Request) {
-		handleInputMode(w, r, paths)
+		handleInputMode(w, r, webFS)
 	})
 
 	mux.HandleFunc("/api/scan", func(w http.ResponseWriter, r *http.Request) {
-		handleStartScan(w, r, paths, hub)
+		handleStartScan(w, r, paths, hub, batchMgr)
+	})
+
+	mux.HandleFunc("/api/scan/", func(w http.ResponseWriter, r *http.Request) {
+		handleCancelBatch(w, r, hub, batchMgr)
+	})
+
+	mux.HandleFunc("/api/scans", func(w http.ResponseWriter, r *http.Request) {
+		handleScanHistory(w, r, paths)
+	})
+
+	mux.HandleFunc("/api/scans/compare", func(w http.ResponseWriter, r *http.Request) {
+		handleCompareScans(w, r, paths)
+	})
+
+	mux.HandleFunc("/api/dork-categories", func(w http.ResponseWriter, r *http.Request) {
+		handleDorkCategories(w, r, paths)
 	})
 
 	mux.HandleFunc("/api/stream-logs-sse", func(w http.ResponseWriter, r *http.Request) {
@@ -182,29 +202,33 @@ func registerRoutes(mux *http.ServeMux, paths AppPaths, hub *SSEHub) {
 		handleExportArtifact(w, r, paths, "docx")
 	})
 
+	mux.HandleFunc("/api/export/sarif/", func(w http.ResponseWriter, r *http.Request) {
+		handleExportArtifact(w, r, paths, "sarif")
+	})
+
+	mux.HandleFunc("/api/export/jsonl/", func(w http.ResponseWriter, r *http.Request) {
+		handleExportArtifact(w, r, paths, "jsonl")
+	})
+
 	mux.HandleFunc("/api/export/batch-zip", func(w http.ResponseWriter, r *http.Request) {
 		handleExportBatchZip(w, r, paths)
 	})
 }
 
-func handleIndex(w http.ResponseWriter, r *http.Request, paths AppPaths) {
-	tmplPath := filepath.Join(paths.WebDir, "templates", "index.html")
-	partialPath := filepath.Join(paths.WebDir, "templates", "partials", "input_single.html")
-	tmpl, err := template.ParseFiles(tmplPath, partialPath)
+func handleIndex(w http.ResponseWriter, r *http.Request, paths AppPaths, webFS fs.FS) {
+	tmpl, err := template.ParseFS(
+		webFS,
+		"templates/index.html",
+		"templates/partials/input_single.html",
+		"templates/partials/scan_options.html",
+	)
 	if err != nil {
 		http.Error(w, "Template load error", http.StatusInternalServerError)
 		return
 	}
 
 	state := fetchDashboardState(paths)
-	statusBarHTML, _, _ := runSubprocess(
-		r.Context(),
-		5*time.Second,
-		paths,
-		"/bin/sh",
-		filepath.Join(paths.CodeBaseDir, "scripts", "sys_telemetry.sh"),
-		paths.DBPath,
-	)
+	statusBarHTML, _ := runTelemetryStatus(r.Context(), paths)
 
 	pyBin := resolvePythonBin(paths)
 	svgArgs := []string{"-m", "py_engine.cli", "--svg", "--db", paths.DBPath}
@@ -270,24 +294,25 @@ func riskClassFor(score int64) string {
 	return "val-pos"
 }
 
-func handleInputMode(w http.ResponseWriter, r *http.Request, paths AppPaths) {
+func handleInputMode(w http.ResponseWriter, r *http.Request, webFS fs.FS) {
 	mode := r.URL.Query().Get("mode")
 	fileName := "input_single.html"
 	if mode == "batch" {
 		fileName = "input_batch.html"
 	}
-	p, err := resolveSandboxedPath(filepath.Join(paths.WebDir, "templates", "partials"), fileName)
-	if err != nil {
-		http.Error(w, "Invalid mode", http.StatusBadRequest)
-		return
-	}
-	content, err := os.ReadFile(p)
+	tmpl, err := template.ParseFS(
+		webFS,
+		"templates/partials/"+fileName,
+		"templates/partials/scan_options.html",
+	)
 	if err != nil {
 		http.Error(w, "Partial missing", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(content)
+	if execErr := tmpl.ExecuteTemplate(w, fileName, struct{}{}); execErr != nil {
+		http.Error(w, "Partial render error", http.StatusInternalServerError)
+	}
 }
 
 func randomHex(n int) string {
@@ -296,7 +321,25 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-func handleStartScan(w http.ResponseWriter, r *http.Request, paths AppPaths, hub *SSEHub) {
+func parseIntBounded(raw string, defVal int, minVal int, maxVal int) int {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defVal
+	}
+	v, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return defVal
+	}
+	if v < minVal {
+		return minVal
+	}
+	if v > maxVal {
+		return maxVal
+	}
+	return v
+}
+
+func handleStartScan(w http.ResponseWriter, r *http.Request, paths AppPaths, hub *SSEHub, batchMgr *BatchManager) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -335,11 +378,39 @@ func handleStartScan(w http.ResponseWriter, r *http.Request, paths AppPaths, hub
 	if r.FormValue("stealth_present") == "" && r.FormValue("stealth_mode") == "" {
 		stealthMode = true
 	}
-	shadowMode := r.FormValue("shadow_mode") == "on" || r.FormValue("shadow_mode") == "true"
-	allowLocal := r.FormValue("local_staging") == "on" || r.FormValue("local_staging") == "true"
+	shadowMode := r.FormValue("shadow_mode") == "on" || r.FormValue("shadow_mode") == "true" || r.FormValue("shadow_mode") == "1"
+	allowLocal := r.FormValue("local_staging") == "on" || r.FormValue("local_staging") == "true" || r.FormValue("local_staging") == "1"
+	spaHydrate := r.FormValue("spa_hydrate") == "on" || r.FormValue("spa_hydrate") == "true" || r.FormValue("spa_hydrate") == "1"
 	engagementID := sanitizeHeaderToken(r.FormValue("engagement_id"))
 
-	targets, err := parseTargetInput(rawTargets, allowLocal)
+	maxDepth := parseIntBounded(r.FormValue("max_depth"), 2, 1, 6)
+	jitterMinMs := int64(parseIntBounded(r.FormValue("jitter_min_ms"), 250, 0, 30000))
+	jitterMaxMs := int64(parseIntBounded(r.FormValue("jitter_max_ms"), 750, int(jitterMinMs), 60000))
+	workers := parseIntBounded(r.FormValue("workers"), 2, 1, 4)
+
+	proxyURL, err := validateOutboundProxy(r.FormValue("proxy_url"), allowLocal)
+	if err != nil {
+		writeScanErr(w, err.Error())
+		return
+	}
+
+	categoriesRaw := r.FormValue("categories")
+	if len(r.Form["categories"]) > 1 {
+		categoriesRaw = strings.Join(r.Form["categories"], ",")
+	}
+	categoriesCSV, err := sanitizeCategoriesInput(categoriesRaw)
+	if err != nil {
+		writeScanErr(w, err.Error())
+		return
+	}
+
+	wordlist, err := sanitizeWordlistInput(r.FormValue("custom_wordlist"))
+	if err != nil {
+		writeScanErr(w, err.Error())
+		return
+	}
+
+	targets, err := parseTargetInputWithProxy(rawTargets, allowLocal, proxyURL != "")
 	if err != nil {
 		writeScanErr(w, err.Error())
 		return
@@ -353,19 +424,128 @@ func handleStartScan(w http.ResponseWriter, r *http.Request, paths AppPaths, hub
 		ShadowMode:        shadowMode,
 		AllowLocalStaging: allowLocal,
 		EngagementID:      engagementID,
+		MaxDepth:          maxDepth,
+		JitterMinMs:       jitterMinMs,
+		JitterMaxMs:       jitterMaxMs,
+		ProxyURL:          proxyURL,
+		CategoriesCSV:     categoriesCSV,
+		Wordlist:          wordlist,
+		SPAHydrate:        spaHydrate,
+		Workers:           workers,
 	}
 
-	go executeScanPipeline(paths, hub, cfg)
+	go executeScanPipeline(paths, hub, batchMgr, cfg)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("HX-Trigger", "scanStarted")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(
 		w,
-		`<div id="scan-status-banner" class="panel-status val-warn">[PIPELINE RUNNING // BATCH %s // %d TARGET(S) QUEUED]</div>`,
+		`<div id="scan-status-banner" class="panel-status val-warn" data-active-batch="%s" data-active-total="%d">[PIPELINE RUNNING // BATCH %s // 0/%d TARGET(S) // EGRESS: INTERNET]</div>`,
+		html.EscapeString(batchID),
+		len(targets),
 		html.EscapeString(batchID),
 		len(targets),
 	)
+}
+
+func handleCancelBatch(w http.ResponseWriter, r *http.Request, hub *SSEHub, batchMgr *BatchManager) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/scan/")
+	if !strings.HasSuffix(trimmed, "/cancel") {
+		http.NotFound(w, r)
+		return
+	}
+	batchID := sanitizeHeaderToken(strings.TrimSuffix(trimmed, "/cancel"))
+	if batchID == "" || strings.Contains(batchID, "/") {
+		http.Error(w, "Invalid batch ID", http.StatusBadRequest)
+		return
+	}
+	cancelled := batchMgr.Cancel(batchID)
+	if cancelled {
+		hub.BroadcastLog(fmt.Sprintf("[WARN] Cancellation requested for batch %s", batchID))
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"batch_id":  batchID,
+		"cancelled": cancelled,
+	})
+}
+
+func handleScanHistory(w http.ResponseWriter, r *http.Request, paths AppPaths) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	limit := parseIntBounded(r.URL.Query().Get("limit"), 40, 1, 200)
+	out, stderr, err := runSubprocess(
+		r.Context(),
+		8*time.Second,
+		paths,
+		resolveSpiderBin(paths),
+		"--history-json",
+		"--limit", strconv.Itoa(limit),
+		"--db", paths.DBPath,
+	)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, string(stderr)), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(bytes.TrimSpace(out))
+}
+
+func handleCompareScans(w http.ResponseWriter, r *http.Request, paths AppPaths) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	scanA, errA := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("a")), 10, 64)
+	scanB, errB := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("b")), 10, 64)
+	if errA != nil || errB != nil || scanA <= 0 || scanB <= 0 {
+		http.Error(w, `{"error":"positive integer query parameters a and b required"}`, http.StatusBadRequest)
+		return
+	}
+	out, stderr, err := runSubprocess(
+		r.Context(),
+		8*time.Second,
+		paths,
+		resolveSpiderBin(paths),
+		"--compare-scans",
+		"--scan-a", strconv.FormatInt(scanA, 10),
+		"--scan-b", strconv.FormatInt(scanB, 10),
+		"--db", paths.DBPath,
+	)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, strings.TrimSpace(string(stderr))), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(bytes.TrimSpace(out))
+}
+
+func handleDorkCategories(w http.ResponseWriter, r *http.Request, paths AppPaths) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	out, stderr, err := runSubprocess(
+		r.Context(),
+		8*time.Second,
+		paths,
+		resolveSpiderBin(paths),
+		"--categories-json",
+		"--db", paths.DBPath,
+	)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, string(stderr)), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(bytes.TrimSpace(out))
 }
 
 func writeScanErr(w http.ResponseWriter, msg string) {
@@ -385,6 +565,10 @@ func handleSSELogs(w http.ResponseWriter, r *http.Request, hub *SSEHub) {
 		return
 	}
 
+	// Disable per-request server WriteTimeout for long-lived SSE event streams
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -396,7 +580,7 @@ func handleSSELogs(w http.ResponseWriter, r *http.Request, hub *SSEHub) {
 	for _, line := range history {
 		fmt.Fprintf(w, "event: log\ndata: %s\n\n", line)
 	}
-	fmt.Fprintf(w, "event: connected\ndata: <div class=\"sse-line val-pos\">&gt; [SSE CONNECTED // LOOPBACK 127.0.0.1]</div>\n\n")
+	fmt.Fprintf(w, "event: connected\ndata: <div class=\"sse-line val-pos\">&gt; [SSE CONNECTED // GUI LOOPBACK 127.0.0.1 // EGRESS: INTERNET]</div>\n\n")
 	flusher.Flush()
 
 	ticker := time.NewTicker(15 * time.Second)
@@ -473,14 +657,7 @@ func handleFindingsPanel(w http.ResponseWriter, r *http.Request, paths AppPaths)
 }
 
 func handleTelemetryStatus(w http.ResponseWriter, r *http.Request, paths AppPaths) {
-	out, _, err := runSubprocess(
-		r.Context(),
-		5*time.Second,
-		paths,
-		"/bin/sh",
-		filepath.Join(paths.CodeBaseDir, "scripts", "sys_telemetry.sh"),
-		paths.DBPath,
-	)
+	out, err := runTelemetryStatus(r.Context(), paths)
 	if err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(`<span class="val-neg">[TELEMETRY OFFLINE]</span>`))
@@ -491,15 +668,7 @@ func handleTelemetryStatus(w http.ResponseWriter, r *http.Request, paths AppPath
 }
 
 func handleBackupBadge(w http.ResponseWriter, r *http.Request, paths AppPaths) {
-	out, _, err := runSubprocess(
-		r.Context(),
-		15*time.Second,
-		paths,
-		"/bin/sh",
-		filepath.Join(paths.CodeBaseDir, "scripts", "backup_and_sign.sh"),
-		paths.DBPath,
-		paths.BackupDir,
-	)
+	out, err := runBackupAndSign(r.Context(), paths)
 	if err != nil {
 		http.Error(w, `<span class="val-neg">[BACKUP_FAULT]</span>`, http.StatusInternalServerError)
 		return
@@ -508,7 +677,42 @@ func handleBackupBadge(w http.ResponseWriter, r *http.Request, paths AppPaths) {
 	_, _ = w.Write(out)
 }
 
+type exportFormatSpec struct {
+	filePattern string
+	contentType string
+	cliFlag     string
+}
+
+var exportFormatSpecs = map[string]exportFormatSpec{
+	"md": {
+		filePattern: "autodorker_triage_scan_%d.md",
+		contentType: "text/markdown; charset=utf-8",
+		cliFlag:     "--export-md",
+	},
+	"docx": {
+		filePattern: "AutoDorker_Enterprise_Report_%d.docx",
+		contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		cliFlag:     "--export-docx",
+	},
+	"sarif": {
+		filePattern: "autodorker_scan_%d.sarif",
+		contentType: "application/sarif+json; charset=utf-8",
+		cliFlag:     "--export-sarif",
+	},
+	"jsonl": {
+		filePattern: "autodorker_scan_%d.jsonl",
+		contentType: "application/x-ndjson; charset=utf-8",
+		cliFlag:     "--export-jsonl",
+	},
+}
+
 func handleExportArtifact(w http.ResponseWriter, r *http.Request, paths AppPaths, ext string) {
+	spec, ok := exportFormatSpecs[ext]
+	if !ok {
+		http.Error(w, "Unsupported export format", http.StatusBadRequest)
+		return
+	}
+
 	prefix := fmt.Sprintf("/api/export/%s/", ext)
 	idStr := strings.TrimPrefix(r.URL.Path, prefix)
 	idStr = strings.TrimSpace(idStr)
@@ -528,19 +732,9 @@ func handleExportArtifact(w http.ResponseWriter, r *http.Request, paths AppPaths
 		return
 	}
 
-	var filename string
-	var contentType string
-	var cliFlag string
-	if ext == "md" {
-		filename = fmt.Sprintf("autodorker_triage_scan_%d.md", scanID)
-		contentType = "text/markdown; charset=utf-8"
-		cliFlag = "--export-md"
-	} else {
-		filename = fmt.Sprintf("AutoDorker_Enterprise_Report_%d.docx", scanID)
-		contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-		cliFlag = "--export-docx"
-	}
-	filename = sanitizeFilename(filename, fmt.Sprintf("report_%d.%s", scanID, ext))
+	filename := sanitizeFilename(fmt.Sprintf(spec.filePattern, scanID), fmt.Sprintf("report_%d.%s", scanID, ext))
+	contentType := spec.contentType
+	cliFlag := spec.cliFlag
 
 	// Look inside Output/Targ* first
 	var artifactPath string
@@ -638,7 +832,12 @@ func handleExportBatchZip(w http.ResponseWriter, r *http.Request, paths AppPaths
 		return
 	}
 
-	zipName := fmt.Sprintf("AutoDorker_Batch_Audit_%s.zip", time.Now().UTC().Format("20060102_150405"))
+	batchLabel := sanitizeFilename(r.URL.Query().Get("batch_id"), "")
+	zipPrefix := "AutoDorker_Batch_Audit"
+	if batchLabel != "" {
+		zipPrefix = "AutoDorker_" + batchLabel
+	}
+	zipName := fmt.Sprintf("%s_%s.zip", zipPrefix, time.Now().UTC().Format("20060102_150405"))
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipName))
 	_, _ = w.Write(buf.Bytes())

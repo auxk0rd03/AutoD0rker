@@ -5,7 +5,7 @@
   "name": "AutoDorker-1.0.0-SBOM",
   "documentNamespace": "https://cybernest.local/spdx/autodorker-1.0.0",
   "creationInfo": {
-    "created": "2026-11-13T01:47:31Z",
+    "created": "2026-11-13T04:31:01Z",
     "creators": [
       "Tool: AutoDorker-SBOM-Generator-1.0"
     ]
@@ -158,7 +158,7 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "a0b817f3800d8acc0a697ab124c0f52ea47f8bdbb5d9300bf0cffc84ecf64aca"
+          "checksumValue": "2981d1eb275ed4483838c0a2125511fb984cfdc8f7924bc26d51408194c33a31"
         }
       ]
     },
@@ -171,7 +171,7 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "db4d3dd842e93420799584e4b5fc3547a6f40594877b44ab3dfe7f8382a9a220"
+          "checksumValue": "26b46bca508a7aefa14352276fe116a52036475f804fb92f4ac0d244b025f443"
         }
       ]
     },

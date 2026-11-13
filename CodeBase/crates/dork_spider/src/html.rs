@@ -106,9 +106,11 @@ pub fn render_scan_htmx_response(
     <div class="val-pos">{ast_esc} ({conf_str})</div>
   </td>
   <td class="actions-cell">
-    <button type="button" class="btn-mini" data-curl="{curl_esc}" onclick="copyCurlPoC(this)">[cURL]</button>
+    <button type="button" class="btn-mini" data-curl="{curl_esc}">[cURL]</button>
     <a class="btn-mini" href="/api/export/md/{sid}">[.MD]</a>
     <a class="btn-mini" href="/api/export/docx/{sid}">[.DOCX]</a>
+    <a class="btn-mini" href="/api/export/sarif/{sid}">[.SARIF]</a>
+    <a class="btn-mini" href="/api/export/jsonl/{sid}">[.JSONL]</a>
   </td>
 </tr>"#,
             fid = fid,

@@ -11,7 +11,7 @@
 <body>
   <div class="frame-shell">
     <header class="top-bar">
-      <div class="brand-tag">[SYS.01 // AUTODORKER v1.0 // CYBERNEST LABS]</div>
+      <div class="brand-tag">[SYS.01 // AUTODORKER v2.0 // CYBERNEST LABS]</div>
       <div class="status-cluster">
         <div id="top-status-bar" hx-get="/telemetry/status" hx-trigger="every 30s" hx-swap="innerHTML">
           {{.StatusBarHTML}}
@@ -67,7 +67,17 @@
           </div>
 
           <div id="scan-status-banner" class="panel-status val-muted">
-            [STANDBY // LOOPBACK 127.0.0.1 // SSRF GUARD ARMED]
+            [STANDBY // GUI: 127.0.0.1 // OUTBOUND EGRESS: INTERNET // SSRF GUARD ARMED]
+          </div>
+
+          <div id="batch-progress-panel" class="progress-panel hidden-panel">
+            <div class="progress-meta">
+              <span id="batch-progress-label" class="val-muted">[QUEUE: 0/0 TARGETS]</span>
+              <button id="btn-cancel-batch" type="button" class="btn-mini btn-danger" disabled>[ABORT BATCH]</button>
+            </div>
+            <div class="progress-track">
+              <div id="batch-progress-fill" class="progress-fill"></div>
+            </div>
           </div>
         </div>
 
@@ -84,13 +94,33 @@
         <div class="panel-box">
           <div class="panel-header">
             <span>VERIFIED DORK LEDGER &amp; ENTERPRISE DELIVERABLES</span>
-            <span class="val-muted">[VIDS .MD / .DOCX / BATCH .ZIP]</span>
+            <span class="val-muted">[VIDS .MD / .DOCX / .SARIF / .JSONL / BATCH .ZIP]</span>
           </div>
+
+          <div class="history-bar">
+            <div class="history-group">
+              <label class="field-label inline-lbl" for="select-history-scan">HISTORY</label>
+              <select id="select-history-scan" class="select-ctrl">
+                <option value="">[LATEST SCAN]</option>
+              </select>
+            </div>
+            <div class="history-group">
+              <label class="field-label inline-lbl" for="select-compare-scan-a">DIFF</label>
+              <select id="select-compare-scan-a" class="select-ctrl"></select>
+              <span class="val-muted">VS</span>
+              <select id="select-compare-scan-b" class="select-ctrl"></select>
+              <button id="btn-compare-scans" type="button" class="btn-mini">[COMPARE]</button>
+            </div>
+          </div>
+
+          <div id="scan-compare-result" class="compare-card hidden-panel"></div>
 
           <div class="export-bar">
             <a id="btn-export-md" class="btn-action" href="/api/export/md/{{if gt .State.LatestScanID 0}}{{.State.LatestScanID}}{{else}}latest{{end}}">[EXPORT .MD]</a>
             <a id="btn-export-docx" class="btn-action" href="/api/export/docx/{{if gt .State.LatestScanID 0}}{{.State.LatestScanID}}{{else}}latest{{end}}">[EXPORT .DOCX]</a>
-            <a class="btn-action" href="/api/export/batch-zip">[DOWNLOAD BATCH .ZIP]</a>
+            <a id="btn-export-sarif" class="btn-action" href="/api/export/sarif/{{if gt .State.LatestScanID 0}}{{.State.LatestScanID}}{{else}}latest{{end}}">[EXPORT .SARIF]</a>
+            <a id="btn-export-jsonl" class="btn-action" href="/api/export/jsonl/{{if gt .State.LatestScanID 0}}{{.State.LatestScanID}}{{else}}latest{{end}}">[EXPORT .JSONL]</a>
+            <a id="btn-export-batch-zip" class="btn-action" href="/api/export/batch-zip{{if .State.LatestBatchID}}?batch_id={{.State.LatestBatchID}}{{end}}">[DOWNLOAD BATCH .ZIP]</a>
             <button type="button" class="btn-action" hx-post="/api/backup" hx-target="#audit-lock-badge" hx-swap="innerHTML">[VACUUM + SHA256 LOCK]</button>
           </div>
 

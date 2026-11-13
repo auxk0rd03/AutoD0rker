@@ -7,15 +7,33 @@ import (
 	"crypto/fips140"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
+
+	webassets "github.com/auxk0rd03/AutoD0rker/gateway"
 )
+
+func resolveWebFS(paths AppPaths, forceEmbedded bool) (fs.FS, bool) {
+	if !forceEmbedded {
+		indexDisk := filepath.Join(paths.WebDir, "templates", "index.html")
+		if _, err := os.Stat(indexDisk); err == nil {
+			return os.DirFS(paths.WebDir), false
+		}
+	}
+	sub, err := fs.Sub(webassets.EmbeddedWebFS, "web")
+	if err != nil {
+		return os.DirFS(paths.WebDir), false
+	}
+	return sub, true
+}
 
 func strictLocalSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +71,19 @@ func acquireLoopbackListener(preferred string) (net.Listener, string, error) {
 
 func main() {
 	bindFlag := flag.String("bind", "", "Loopback bind address (default 127.0.0.1:8090)")
+	embeddedUIFlag := flag.Bool("embedded-ui", false, "Serve UI templates & static assets from embedded binary FS")
+	packageReleaseFlag := flag.String("package-release", "", "Build standalone release .tar.gz bundle at path and exit")
 	flag.Parse()
+
+	paths := resolveAppPaths()
+
+	if *packageReleaseFlag != "" {
+		if err := buildReleaseTarball(paths, *packageReleaseFlag); err != nil {
+			log.Fatalf("[ERR_HALT] Release packaging failed: %v", err)
+		}
+		log.Printf("[PKG] Release archive created at %s", *packageReleaseFlag)
+		return
+	}
 
 	bindAddr := *bindFlag
 	if bindAddr == "" {
@@ -67,7 +97,6 @@ func main() {
 		log.Fatalf("[ERR_HALT] %v", err)
 	}
 
-	paths := resolveAppPaths()
 	_ = os.MkdirAll(paths.OutputDir, 0750)
 	_ = os.MkdirAll(paths.BackupDir, 0750)
 
@@ -86,9 +115,11 @@ func main() {
 		}
 	}
 
+	webFS, usingEmbedded := resolveWebFS(paths, *embeddedUIFlag)
 	hub := NewSSEHub()
+	batchMgr := NewBatchManager()
 	mux := http.NewServeMux()
-	registerRoutes(mux, paths, hub)
+	registerRoutes(mux, paths, hub, batchMgr, webFS)
 
 	ln, actualAddr, err := acquireLoopbackListener(bindAddr)
 	if err != nil {
@@ -107,9 +138,13 @@ func main() {
 	if fips140.Enabled() {
 		fipsState = "FIPS-140-3_ACTIVE"
 	}
+	uiMode := "DISK_UI"
+	if usingEmbedded {
+		uiMode = "EMBEDDED_UI"
+	}
 
-	log.Printf("[SYS.01-AUTODORKER] Listening strictly on http://%s (Loopback Sovereignty // %s)", actualAddr, fipsState)
-	hub.BroadcastLog(fmt.Sprintf("[OK] Gateway online at http://%s (%s)", actualAddr, fipsState))
+	log.Printf("[SYS.01-AUTODORKER] GUI strictly on http://%s // Outbound Scans -> INTERNET (%s // %s)", actualAddr, fipsState, uiMode)
+	hub.BroadcastLog(fmt.Sprintf("[OK] GUI loopback http://%s // Outbound Scans -> INTERNET (%s // %s)", actualAddr, fipsState, uiMode))
 
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)

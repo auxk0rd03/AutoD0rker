@@ -149,9 +149,20 @@ cmd_test() {
 cmd_fmt() {
     printf '[FMT] Formatting Rust & Go source trees...\n'
     (cd crates/dork_spider && cargo fmt)
+    gofmt -w webassets.go
     (cd cmd/gateway && go fmt ./...)
     (cd tests && go fmt ./...)
     printf '[OK] Formatting complete.\n'
+}
+
+cmd_package() {
+    ensure_venv
+    if [ ! -x "bin/gateway" ] || [ ! -x "bin/dork_spider" ]; then
+        cmd_build
+    fi
+    OUT_TAR="${1:-bin/autodorker-release-linux.tar.gz}"
+    printf '[PKG] Packaging self-contained release archive -> %s\n' "$OUT_TAR"
+    ./bin/gateway --package-release "$OUT_TAR"
 }
 
 case "${1:-help}" in
@@ -161,9 +172,10 @@ case "${1:-help}" in
     cli) shift; cmd_cli "${1:-}" ;;
     simulate) cmd_simulate ;;
     test) cmd_test ;;
+    package) shift; cmd_package "${1:-}" ;;
     fmt) cmd_fmt ;;
     *)
-        printf 'Usage: %s {setup|build|run|serve|cli [url]|simulate|test|fmt}\n' "$0"
+        printf 'Usage: %s {setup|build|run|serve|cli [url]|simulate|test|package [out.tar.gz]|fmt}\n' "$0"
         exit 1
         ;;
 esac

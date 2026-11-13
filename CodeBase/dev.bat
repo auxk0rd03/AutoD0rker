@@ -20,9 +20,10 @@ if /I "%CMD%"=="serve" goto cmd_run
 if /I "%CMD%"=="cli" goto cmd_cli
 if /I "%CMD%"=="simulate" goto cmd_simulate
 if /I "%CMD%"=="test" goto cmd_test
+if /I "%CMD%"=="package" goto cmd_package
 if /I "%CMD%"=="fmt" goto cmd_fmt
 
-echo Usage: dev.bat {setup^|build^|run^|serve^|cli [url]^|simulate^|test^|fmt}
+echo Usage: dev.bat {setup^|build^|run^|serve^|cli [url]^|simulate^|test^|package [out.tar.gz]^|fmt}
 exit /b 1
 
 :ensure_venv
@@ -86,6 +87,8 @@ call :ensure_venv || exit /b 1
 if not exist "bin\dork_spider.exe" call :cmd_build || exit /b 1
 if "%~2"=="" (
     bin\dork_spider.exe --ingest-csv "%AUTODORKER_DORKSET_PATH%" --db "%AUTODORKER_DB_PATH%"
+    .venv\Scripts\python.exe -m py_engine.cli --telemetry-status --db "%AUTODORKER_DB_PATH%"
+    .venv\Scripts\python.exe -m py_engine.cli --backup-sign --db "%AUTODORKER_DB_PATH%" --backup-dir data\backups
 ) else (
     bin\dork_spider.exe --scan --target "%~2" --db "%AUTODORKER_DB_PATH%" --json
 )
@@ -111,10 +114,21 @@ popd
 .venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
 exit /b %errorlevel%
 
+:cmd_package
+call :ensure_venv || exit /b 1
+if not exist "bin\gateway.exe" call :cmd_build || exit /b 1
+if not exist "bin\dork_spider.exe" call :cmd_build || exit /b 1
+set "OUT_TAR=%~2"
+if "%OUT_TAR%"=="" set "OUT_TAR=bin\autodorker-release-windows.tar.gz"
+echo [PKG] Packaging self-contained release archive -^> %OUT_TAR%
+bin\gateway.exe --package-release "%OUT_TAR%"
+exit /b %errorlevel%
+
 :cmd_fmt
 pushd crates\dork_spider
 cargo fmt
 popd
+gofmt -w webassets.go
 pushd cmd\gateway
 go fmt ./...
 popd

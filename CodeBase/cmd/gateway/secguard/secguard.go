@@ -103,13 +103,15 @@ func SanitizeTargetInput(raw string) (string, error) {
 		return "", fmt.Errorf("rejected scheme %q: only http/https permitted", u.Scheme)
 	}
 	hostname := strings.ToLower(u.Hostname())
-	if hostname == "" || !hostLabelRe.MatchString(hostname) {
+	if hostname == "" || (net.ParseIP(hostname) == nil && !hostLabelRe.MatchString(hostname)) {
 		return "", fmt.Errorf("invalid hostname in target %q", raw)
 	}
 
 	u.Scheme = scheme
 	if port := u.Port(); port != "" {
 		u.Host = net.JoinHostPort(hostname, port)
+	} else if strings.Contains(hostname, ":") {
+		u.Host = "[" + hostname + "]"
 	} else {
 		u.Host = hostname
 	}
@@ -161,16 +163,25 @@ func ValidateTargetSSRFWithLookup(
 	return nil
 }
 
-// ParseTargetInput parses single URL, comma-separated lists, or CSV src_list uploads,
-// enforcing sanitization, order-preserving deduplication, and SSRF validation.
-func ParseTargetInput(rawInput string, allowLocalStaging bool) ([]string, error) {
-	return ParseTargetInputWithLookup(rawInput, allowLocalStaging, net.LookupIP)
+// ValidateTargetSSRFForScan allows unresolved external DNS only when routed through a validated outbound proxy.
+func ValidateTargetSSRFForScan(
+	normalizedURL string,
+	allowLocalStaging bool,
+	hasProxy bool,
+	lookup func(string) ([]net.IP, error),
+) error {
+	err := ValidateTargetSSRFWithLookup(normalizedURL, allowLocalStaging, lookup)
+	if err != nil && hasProxy && strings.HasPrefix(err.Error(), "DNS resolution failed for ") {
+		return nil
+	}
+	return err
 }
 
-// ParseTargetInputWithLookup performs target parsing using an injected DNS lookup function.
-func ParseTargetInputWithLookup(
+// ParseTargetInputWithOptions parses target URLs with optional proxy-delegated DNS fallback.
+func ParseTargetInputWithOptions(
 	rawInput string,
 	allowLocalStaging bool,
+	hasProxy bool,
 	lookup func(string) ([]net.IP, error),
 ) ([]string, error) {
 	if strings.TrimSpace(rawInput) == "" {
@@ -186,14 +197,11 @@ func ParseTargetInputWithLookup(
 		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "#") {
 			continue
 		}
-		// Skip CSV header rows
 		lowFirst := strings.ToLower(strings.Split(trimmedLine, ",")[0])
 		lowFirst = strings.TrimSpace(strings.Trim(lowFirst, `"'`))
 		if lowFirst == "domain" || lowFirst == "url" || lowFirst == "target" || lowFirst == "target_url" || lowFirst == "host" {
 			continue
 		}
-
-		// Support comma-separated list on a single line (url1,url2,url3)
 		parts := strings.Split(trimmedLine, ",")
 		for _, part := range parts {
 			candidate := strings.TrimSpace(part)
@@ -204,7 +212,7 @@ func ParseTargetInputWithLookup(
 			if err != nil {
 				return nil, err
 			}
-			if err := ValidateTargetSSRFWithLookup(norm, allowLocalStaging, lookup); err != nil {
+			if err := ValidateTargetSSRFForScan(norm, allowLocalStaging, hasProxy, lookup); err != nil {
 				return nil, err
 			}
 			if _, ok := seen[norm]; !ok {
@@ -218,6 +226,21 @@ func ParseTargetInputWithLookup(
 		return nil, fmt.Errorf("no valid target URLs extracted")
 	}
 	return targets, nil
+}
+
+// ParseTargetInput parses single URL, comma-separated lists, or CSV src_list uploads,
+// enforcing sanitization, order-preserving deduplication, and SSRF validation.
+func ParseTargetInput(rawInput string, allowLocalStaging bool) ([]string, error) {
+	return ParseTargetInputWithLookup(rawInput, allowLocalStaging, net.LookupIP)
+}
+
+// ParseTargetInputWithLookup performs target parsing using an injected DNS lookup function.
+func ParseTargetInputWithLookup(
+	rawInput string,
+	allowLocalStaging bool,
+	lookup func(string) ([]net.IP, error),
+) ([]string, error) {
+	return ParseTargetInputWithOptions(rawInput, allowLocalStaging, false, lookup)
 }
 
 // SanitizeFilename prevents directory traversal and control-character filenames (CWE-22).
@@ -278,4 +301,92 @@ func SanitizeHeaderToken(val string) string {
 		}
 	}
 	return b.String()
+}
+
+// ValidateOutboundProxy validates an optional upstream HTTP/HTTPS proxy URL against injection & SSRF rules.
+func ValidateOutboundProxy(rawProxy string, allowLocalStaging bool) (string, error) {
+	return ValidateOutboundProxyWithLookup(rawProxy, allowLocalStaging, net.LookupIP)
+}
+
+// ValidateOutboundProxyWithLookup validates an outbound proxy URL using an injectable DNS lookup function.
+func ValidateOutboundProxyWithLookup(
+	rawProxy string,
+	allowLocalStaging bool,
+	lookup func(string) ([]net.IP, error),
+) (string, error) {
+	cleaned := strings.TrimSpace(rawProxy)
+	if cleaned == "" {
+		return "", nil
+	}
+	if shellMetaRe.MatchString(cleaned) || strings.ContainsAny(cleaned, " \t") || strings.HasPrefix(cleaned, "-") {
+		return "", fmt.Errorf("rejected proxy URL %q: prohibited characters", cleaned)
+	}
+	if !strings.HasPrefix(strings.ToLower(cleaned), "http://") && !strings.HasPrefix(strings.ToLower(cleaned), "https://") {
+		return "", fmt.Errorf("proxy URL %q must use http:// or https:// scheme", cleaned)
+	}
+	u, err := url.Parse(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("invalid proxy URL %q: %w", rawProxy, err)
+	}
+	if u.Hostname() == "" || u.Port() == "" {
+		return "", fmt.Errorf("proxy URL %q must include host and port", rawProxy)
+	}
+	if err := ValidateTargetSSRFWithLookup(u.String(), allowLocalStaging, lookup); err != nil {
+		return "", fmt.Errorf("proxy SSRF validation failed: %w", err)
+	}
+	u.Fragment = ""
+	u.RawQuery = ""
+	return u.String(), nil
+}
+
+// SanitizeWordlistInput parses user-supplied custom probe paths with strict traversal & injection guards.
+func SanitizeWordlistInput(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var out []string
+	seen := make(map[string]struct{})
+	normalized := strings.NewReplacer("\r\n", "\n", ",", "\n").Replace(raw)
+	for _, entry := range strings.Split(normalized, "\n") {
+		token := strings.TrimSpace(entry)
+		if token == "" || strings.HasPrefix(token, "#") {
+			continue
+		}
+		if shellMetaRe.MatchString(token) || strings.Contains(token, "..") || strings.Contains(token, `\`) || strings.ContainsAny(token, " \t") {
+			return nil, fmt.Errorf("rejected unsafe wordlist path %q", token)
+		}
+		if !strings.HasPrefix(token, "/") {
+			token = "/" + token
+		}
+		if len(token) > 128 {
+			return nil, fmt.Errorf("wordlist path exceeds 128 chars: %q", token)
+		}
+		if _, ok := seen[token]; !ok {
+			seen[token] = struct{}{}
+			out = append(out, token)
+			if len(out) >= 128 {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// SanitizeCategoriesInput cleans comma-separated dork category filters and blocks injection characters.
+func SanitizeCategoriesInput(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	var clean []string
+	for _, part := range strings.Split(raw, ",") {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		if shellMetaRe.MatchString(p) || strings.HasPrefix(p, "-") {
+			return "", fmt.Errorf("rejected unsafe category filter %q", p)
+		}
+		clean = append(clean, p)
+	}
+	return strings.Join(clean, ","), nil
 }
